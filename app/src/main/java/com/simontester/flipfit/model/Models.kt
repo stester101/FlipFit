@@ -13,6 +13,19 @@ data class Exercise(
     val defaultSets: Int = 3
 )
 
+data class ExerciseDraft(
+    val id: Long? = null,
+    val name: String,
+    val category: String,
+    val equipment: String,
+    val trackingType: String = "weight_reps",
+    val incrementKg: Double? = null,
+    val favorite: Boolean = false,
+    val diagramHint: String = "",
+    val defaultSets: Int = 3,
+    val notes: String = ""
+)
+
 data class TemplateExercise(val exercise: Exercise, val orderIndex: Int, val defaultSets: Int)
 data class WorkoutTemplate(val id: Long, val name: String, val exercises: List<TemplateExercise>)
 
@@ -45,6 +58,23 @@ data class WorkoutSession(
 )
 
 data class PreviousSet(val setNumber: Int, val weightKg: Double, val reps: Int)
+
+data class PersonalBest(val weightKg: Double, val reps: Int)
+
+data class PrStatus(
+    val proposedWeight: Double,
+    val proposedReps: Int,
+    val best: PersonalBest?,
+    val wouldBePr: Boolean
+)
+
+data class ExerciseBest(
+    val exerciseId: Long,
+    val exerciseName: String,
+    val category: String,
+    val weightKg: Double,
+    val reps: Int
+)
 
 data class CompletionSummary(
     val name: String,

@@ -100,6 +100,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun previous(exerciseId: Long): List<PreviousSet> = _active.value?.let { db.previousSets(exerciseId, it.id) } ?: emptyList()
+    fun prStatus(exerciseId: Long, weight: Double, reps: Int): PrStatus = db.prStatus(exerciseId, weight, reps)
+    fun personalBests(): List<ExerciseBest> = db.personalBests()
+
+    fun saveExercise(draft: ExerciseDraft) { db.saveExercise(draft); refresh() }
+    fun duplicateExercise(exerciseId: Long) { db.duplicateExercise(exerciseId); refresh() }
+    fun deleteExercise(exerciseId: Long) { db.deleteExercise(exerciseId); refresh() }
+
+    fun createTemplate(name: String) { db.createTemplate(name); refresh() }
+    fun renameTemplate(templateId: Long, name: String) { db.renameTemplate(templateId, name); refresh() }
+    fun deleteTemplate(templateId: Long) { db.deleteTemplate(templateId); refresh() }
+    fun duplicateTemplate(templateId: Long) { db.duplicateTemplate(templateId); refresh() }
+    fun addTemplateExercise(templateId: Long, exerciseId: Long) { db.addTemplateExercise(templateId, exerciseId); refresh() }
+    fun removeTemplateExercise(templateId: Long, exerciseId: Long) { db.removeTemplateExercise(templateId, exerciseId); refresh() }
+    fun adjustTemplateSets(templateId: Long, exerciseId: Long, delta: Int) { db.adjustTemplateSets(templateId, exerciseId, delta); refresh() }
+    fun moveTemplateExercise(templateId: Long, exerciseId: Long, direction: Int) { db.moveTemplateExercise(templateId, exerciseId, direction); refresh() }
 
     fun clearPrFlash() { _prFlash.value = false }
     fun clearCompletion() { _completion.value = null }

@@ -30,11 +30,11 @@ jobs:
       - name: Build debug APK
         run: ./gradlew :app:assembleDebug --stacktrace
       - name: Rename APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk FlipFit-v0.2.0-debug.apk
+        run: cp app/build/outputs/apk/debug/app-debug.apk FlipFit-v0.3.0-debug.apk
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: FlipFit-v0.2.0-APK
-          path: FlipFit-v0.2.0-debug.apk
+          name: FlipFit-v0.3.0-APK
+          path: FlipFit-v0.3.0-debug.apk
           if-no-files-found: error
           retention-days: 30

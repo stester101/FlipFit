@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.0 — 2026-09-11
+- Fixed the FlexWindow quick-actions menu by replacing the clipped dropdown with a safely sized, fully scrollable cover-screen dialog.
+- Manual weight/reps entry now focuses immediately and selects the whole existing value so typing replaces it.
+- Added live PR preview before logging: NEW PR appears beside the selected weight, while existing best weight/reps remain visible for context.
+- Moved the post-log PR confirmation away from the set counter so SET x / y always stays visible.
+- Marked the current movement graphics explicitly as placeholders pending the proper exercise-specific diagram artwork.
+- Added a full unfolded Exercise Library manager: create, edit, favourite, duplicate, soft-delete, tracking type, default sets, diagram hint and per-exercise increment.
+- Added a full unfolded Template builder: create, rename, duplicate, delete, add/remove exercises, reorder and change set counts.
+- Added tappable workout History with detailed set breakdown, skipped sets, PR markers and total volume.
+- Added a Personal Records screen showing highest weight, most reps at that weight and estimated 1RM.
+- Database migrated to v3 with soft-archiving for exercises so workout history remains intact when an exercise is removed from the library.
+- Updated GitHub Actions artifact/version naming to v0.3.0.
+
 ## 0.2.0 — 2026-09-11
 - Major cover-screen usability pass: larger +/- controls, exact weight/reps entry, compact all-set previous performance and persisted exercise position.
 - Global weight increment now defaults to 0.5 kg and is configurable in Settings; database support added for per-exercise increments.
