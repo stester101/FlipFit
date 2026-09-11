@@ -11,16 +11,103 @@ import kotlinx.coroutines.flow.StateFlow
 class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val db = FlipFitDatabase(app)
     val settings = SettingsStore(app)
-    private val _templates = MutableStateFlow(db.getTemplates()); val templates: StateFlow<List<WorkoutTemplate>> = _templates
-    private val _active = MutableStateFlow(db.activeSession()); val active: StateFlow<WorkoutSession?> = _active
-    private val _history = MutableStateFlow(db.history()); val history: StateFlow<List<WorkoutSession>> = _history
-    private val _lastLoggedId = MutableStateFlow<Long?>(null); val lastLoggedId: StateFlow<Long?> = _lastLoggedId
 
-    fun start(template: WorkoutTemplate) { db.startSession(template); refresh() }
-    fun log(exerciseId: Long, setNumber: Int, weight: Double, reps: Int) { val s=_active.value ?: return; _lastLoggedId.value=db.logSet(s.id,exerciseId,setNumber,weight,reps); refresh() }
-    fun undo() { _lastLoggedId.value?.let(db::deleteSet); _lastLoggedId.value=null; refresh() }
-    fun finish() { _active.value?.let { db.finishSession(it.id) }; _lastLoggedId.value=null; refresh() }
-    fun previous(exerciseId: Long): List<PreviousSet> = _active.value?.let { db.previousSets(exerciseId,it.id) } ?: emptyList()
-    fun clearUndo() { _lastLoggedId.value=null }
-    private fun refresh() { _active.value=db.activeSession(); _history.value=db.history() }
+    private val _templates = MutableStateFlow(db.getTemplates())
+    val templates: StateFlow<List<WorkoutTemplate>> = _templates
+
+    private val _exercises = MutableStateFlow(db.getAllExercises())
+    val exercises: StateFlow<List<Exercise>> = _exercises
+
+    private val _active = MutableStateFlow(db.activeSession())
+    val active: StateFlow<WorkoutSession?> = _active
+
+    private val _history = MutableStateFlow(db.history())
+    val history: StateFlow<List<WorkoutSession>> = _history
+
+    private val _completion = MutableStateFlow<CompletionSummary?>(null)
+    val completion: StateFlow<CompletionSummary?> = _completion
+
+    private val _prFlash = MutableStateFlow(false)
+    val prFlash: StateFlow<Boolean> = _prFlash
+
+    fun start(template: WorkoutTemplate) {
+        if (_active.value == null) db.startSession(template)
+        refresh()
+    }
+
+    fun log(workoutExerciseId: Long, setNumber: Int, weight: Double, reps: Int) {
+        val s = _active.value ?: return
+        _prFlash.value = db.logSet(s.id, workoutExerciseId, setNumber, weight, reps)
+        refresh()
+    }
+
+    fun skipSet(workoutExerciseId: Long, setNumber: Int) {
+        val s = _active.value ?: return
+        db.skipSet(s.id, workoutExerciseId, setNumber)
+        _prFlash.value = false
+        refresh()
+    }
+
+    fun skipExercise(workoutExerciseId: Long) {
+        val s = _active.value ?: return
+        db.skipExercise(s.id, workoutExerciseId)
+        _prFlash.value = false
+        refresh()
+    }
+
+    fun adjustSets(workoutExerciseId: Long, delta: Int) {
+        db.adjustTargetSets(workoutExerciseId, delta)
+        refresh()
+    }
+
+    fun jump(orderIndex: Int) {
+        val s = _active.value ?: return
+        db.jumpToExercise(s.id, orderIndex)
+        _prFlash.value = false
+        refresh()
+    }
+
+    fun addExercise(exerciseId: Long) {
+        val s = _active.value ?: return
+        db.addExerciseToSession(s.id, exerciseId)
+        refresh()
+    }
+
+    fun replaceExercise(workoutExerciseId: Long, exerciseId: Long): Boolean {
+        val replaced = db.replaceExercise(workoutExerciseId, exerciseId)
+        refresh()
+        return replaced
+    }
+
+    fun moveExercise(workoutExerciseId: Long, direction: Int) {
+        val s = _active.value ?: return
+        db.moveExercise(s.id, workoutExerciseId, direction)
+        refresh()
+    }
+
+    fun undo() {
+        val s = _active.value ?: return
+        db.undoLastSet(s.id)
+        _prFlash.value = false
+        refresh()
+    }
+
+    fun finish() {
+        val s = _active.value ?: return
+        _completion.value = db.finishSession(s.id)
+        _prFlash.value = false
+        refresh()
+    }
+
+    fun previous(exerciseId: Long): List<PreviousSet> = _active.value?.let { db.previousSets(exerciseId, it.id) } ?: emptyList()
+
+    fun clearPrFlash() { _prFlash.value = false }
+    fun clearCompletion() { _completion.value = null }
+
+    private fun refresh() {
+        _templates.value = db.getTemplates()
+        _exercises.value = db.getAllExercises()
+        _active.value = db.activeSession()
+        _history.value = db.history()
+    }
 }
