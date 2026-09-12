@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0 — 2026-09-12
+- Full FlipFit visual redesign based on the approved restrained black/lime reference direction.
+- Replaced the oversized top chip navigation with a persistent compact bottom navigation shell.
+- Reworked Home into a focused dashboard: quick start, recent workout and a small template preview instead of the entire template library.
+- Added a restrained liquid-glass visual system: translucent charcoal surfaces, fine outlines, subtle lime glass accents and tighter typography/spacing.
+- Reworked unfolded workout presentation to match the new design while retaining all workout functionality.
+- Refined Exercises, Templates, History and PR surfaces to use the same compact card language.
+- Cover-screen workout remains deliberately minimal and high-contrast; functionality is preserved rather than hidden by decoration.
+- Existing workout persistence, PR logic, editing, skipping, adding/replacing/reordering exercises, undo, history and management features remain intact.
+
 ## 0.3.0 — 2026-09-11
 - Fixed the FlexWindow quick-actions menu by replacing the clipped dropdown with a safely sized, fully scrollable cover-screen dialog.
 - Manual weight/reps entry now focuses immediately and selects the whole existing value so typing replaces it.
