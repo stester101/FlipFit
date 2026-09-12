@@ -8,7 +8,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.ui.unit.dp
-import com.simontester.flipfit.ui.FlipFitApp
+import com.simontester.flipfit.ui.FlipFitV05App
 import com.simontester.flipfit.ui.theme.FlipFitTheme
 
 class MainActivity : ComponentActivity() {
@@ -22,7 +22,7 @@ class MainActivity : ComponentActivity() {
                 BoxWithConstraints {
                     val compact = maxWidth <= 480.dp && maxHeight <= 600.dp
                     val wide = maxWidth >= 700.dp
-                    FlipFitApp(vm = vm, compact = compact, wide = wide)
+                    FlipFitV05App(vm = vm, compact = compact, wide = wide)
                 }
             }
         }
