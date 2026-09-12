@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.0 — 2026-09-12
+- Restored the missing full-screen workout actions menu on unfolded devices.
+- Added unfolded workout action parity with cover mode: skip set/exercise, add/remove planned sets, add/replace/reorder exercises, undo and finish workout.
+- Added a dedicated full-screen workout overview button with tappable exercise jumping and set/skipped progress.
+- Added searchable Add/Replace exercise picker directly from the unfolded workout.
+- Added a safety confirmation before finishing a workout early from the unfolded actions menu.
+- Kept the cover-screen workflow unchanged and deliberately minimal.
+- Bumped Android build to versionCode 6 / versionName 0.5.0.
+
 ## 0.4.0 — 2026-09-12
 - Full FlipFit visual redesign based on the approved restrained black/lime reference direction.
 - Replaced the oversized top chip navigation with a persistent compact bottom navigation shell.
