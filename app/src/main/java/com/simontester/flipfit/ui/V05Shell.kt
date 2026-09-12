@@ -1,7 +1,6 @@
 package com.simontester.flipfit.ui
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -23,10 +22,6 @@ import com.simontester.flipfit.model.SessionExercise
 import com.simontester.flipfit.model.WorkoutSession
 import com.simontester.flipfit.ui.theme.*
 
-/**
- * v0.5 shell keeps the proven v0.4 UI intact and adds full unfolded-workout
- * action parity without disturbing the cover-screen workflow.
- */
 @Composable
 fun FlipFitV05App(vm: MainViewModel, compact: Boolean, wide: Boolean) {
     val active by vm.active.collectAsState()
@@ -39,14 +34,9 @@ fun FlipFitV05App(vm: MainViewModel, compact: Boolean, wide: Boolean) {
 
     Box(Modifier.fillMaxSize()) {
         FlipFitApp(vm = vm, compact = compact, wide = wide)
-
-        // Cover already has its own complete ... menu. This is unfolded only.
         if (!compact && active != null && completion == null) {
             Row(
-                Modifier
-                    .align(Alignment.TopEnd)
-                    .safeDrawingPadding()
-                    .padding(top = 12.dp, end = 14.dp),
+                Modifier.align(Alignment.TopEnd).safeDrawingPadding().padding(top = 12.dp, end = 14.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 OutlinedButton(
@@ -55,9 +45,7 @@ fun FlipFitV05App(vm: MainViewModel, compact: Boolean, wide: Boolean) {
                     shape = RoundedCornerShape(15.dp),
                     border = BorderStroke(1.dp, OutlineSoft),
                     colors = ButtonDefaults.outlinedButtonColors(containerColor = Glass)
-                ) {
-                    Text("LIST", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Black)
-                }
+                ) { Text("LIST", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Black) }
                 OutlinedButton(
                     onClick = { menuOpen = true },
                     modifier = Modifier.size(44.dp),
@@ -65,9 +53,7 @@ fun FlipFitV05App(vm: MainViewModel, compact: Boolean, wide: Boolean) {
                     shape = RoundedCornerShape(15.dp),
                     border = BorderStroke(1.dp, OutlineSoft),
                     colors = ButtonDefaults.outlinedButtonColors(containerColor = Glass)
-                ) {
-                    Text("⋮", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Black)
-                }
+                ) { Text("⋮", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Black) }
             }
         }
     }
@@ -80,10 +66,7 @@ fun FlipFitV05App(vm: MainViewModel, compact: Boolean, wide: Boolean) {
                 session = session,
                 current = current,
                 onDismiss = { menuOpen = false },
-                onSkipSet = {
-                    menuOpen = false
-                    nextOpenSet(current)?.let { vm.skipSet(current.id, it) }
-                },
+                onSkipSet = { menuOpen = false; nextOpenSet(current)?.let { vm.skipSet(current.id, it) } },
                 onSkipExercise = { menuOpen = false; vm.skipExercise(current.id) },
                 onAddSet = { menuOpen = false; vm.adjustSets(current.id, 1) },
                 onRemoveSet = { menuOpen = false; vm.adjustSets(current.id, -1) },
@@ -98,24 +81,21 @@ fun FlipFitV05App(vm: MainViewModel, compact: Boolean, wide: Boolean) {
         }
 
         if (overviewOpen) {
-            UnfoldedWorkoutOverview(
-                session = session,
-                onDismiss = { overviewOpen = false },
-                onJump = { order -> overviewOpen = false; vm.jump(order) }
-            )
+            UnfoldedWorkoutOverview(session, { overviewOpen = false }) { order ->
+                overviewOpen = false
+                vm.jump(order)
+            }
         }
 
         pickerMode?.let { mode ->
             V05ExercisePicker(
                 exercises = exercises,
                 title = if (mode == "add") "Add exercise" else "Replace exercise",
-                onDismiss = { pickerMode = null },
-                onPick = { picked ->
-                    if (mode == "add") vm.addExercise(picked.id)
-                    else current?.let { vm.replaceExercise(it.id, picked.id) }
-                    pickerMode = null
-                }
-            )
+                onDismiss = { pickerMode = null }
+            ) { picked ->
+                if (mode == "add") vm.addExercise(picked.id) else current?.let { vm.replaceExercise(it.id, picked.id) }
+                pickerMode = null
+            }
         }
 
         if (confirmFinish) {
@@ -123,12 +103,8 @@ fun FlipFitV05App(vm: MainViewModel, compact: Boolean, wide: Boolean) {
                 onDismissRequest = { confirmFinish = false },
                 containerColor = SurfaceHigh,
                 title = { Text("Finish workout?", color = Color.White, fontWeight = FontWeight.Black) },
-                text = { Text("Your logged and skipped sets will be saved. Unfinished planned sets will make this an ended-early workout.", color = Muted) },
-                confirmButton = {
-                    Button(onClick = { confirmFinish = false; vm.finish() }) {
-                        Text("FINISH", color = Color.Black, fontWeight = FontWeight.Black)
-                    }
-                },
+                text = { Text("Logged and skipped sets will be saved. Unfinished planned sets will make this an ended-early workout.", color = Muted) },
+                confirmButton = { Button(onClick = { confirmFinish = false; vm.finish() }) { Text("FINISH", color = Color.Black, fontWeight = FontWeight.Black) } },
                 dismissButton = { TextButton(onClick = { confirmFinish = false }) { Text("CANCEL", color = Muted) } }
             )
         }
@@ -160,6 +136,8 @@ private fun UnfoldedWorkoutMenu(
     onOverview: () -> Unit,
     onFinish: () -> Unit
 ) {
+    val minOrder = session.exercises.minOfOrNull { it.orderIndex } ?: current.orderIndex
+    val maxOrder = session.exercises.maxOfOrNull { it.orderIndex } ?: current.orderIndex
     Dialog(onDismissRequest = onDismiss) {
         Surface(
             color = SurfaceHigh,
@@ -167,10 +145,7 @@ private fun UnfoldedWorkoutMenu(
             border = BorderStroke(1.dp, OutlineSoft),
             modifier = Modifier.fillMaxWidth().heightIn(max = 660.dp)
         ) {
-            Column(
-                Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp)
-            ) {
+            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(14.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("WORKOUT ACTIONS", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.Black, letterSpacing = 1.1.sp)
@@ -188,8 +163,8 @@ private fun UnfoldedWorkoutMenu(
                 HorizontalDivider(color = OutlineSoft)
                 V05Action("Add exercise", onAddExercise)
                 V05Action("Replace exercise", onReplaceExercise, enabled = current.sets.isEmpty())
-                V05Action("Move exercise up", onMoveUp, enabled = current.orderIndex > session.exercises.minOfOrNull { it.orderIndex } ?: false)
-                V05Action("Move exercise down", onMoveDown, enabled = current.orderIndex < session.exercises.maxOfOrNull { it.orderIndex } ?: false)
+                V05Action("Move exercise up", onMoveUp, enabled = current.orderIndex > minOrder)
+                V05Action("Move exercise down", onMoveDown, enabled = current.orderIndex < maxOrder)
                 HorizontalDivider(color = OutlineSoft)
                 V05Action("Undo last accounted set", onUndo, enabled = session.exercises.any { it.sets.isNotEmpty() })
                 V05Action("Finish workout", onFinish, danger = true)
@@ -201,31 +176,15 @@ private fun UnfoldedWorkoutMenu(
 
 @Composable
 private fun V05Action(label: String, onClick: () -> Unit, enabled: Boolean = true, danger: Boolean = false) {
-    TextButton(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp)
-    ) {
-        Text(
-            label,
-            modifier = Modifier.fillMaxWidth(),
-            textAlign = TextAlign.Start,
-            color = if (!enabled) MutedLow else if (danger) Danger else Color.White,
-            fontSize = 15.sp,
-            fontWeight = FontWeight.SemiBold
-        )
+    TextButton(onClick = onClick, enabled = enabled, modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp)) {
+        Text(label, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Start, color = if (!enabled) MutedLow else if (danger) Danger else Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
 @Composable
 private fun UnfoldedWorkoutOverview(session: WorkoutSession, onDismiss: () -> Unit, onJump: (Int) -> Unit) {
     Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            color = SurfaceHigh,
-            shape = RoundedCornerShape(26.dp),
-            border = BorderStroke(1.dp, OutlineSoft),
-            modifier = Modifier.fillMaxWidth().heightIn(max = 650.dp)
-        ) {
+        Surface(color = SurfaceHigh, shape = RoundedCornerShape(26.dp), border = BorderStroke(1.dp, OutlineSoft), modifier = Modifier.fillMaxWidth().heightIn(max = 650.dp)) {
             Column(Modifier.padding(16.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
@@ -264,40 +223,24 @@ private fun UnfoldedWorkoutOverview(session: WorkoutSession, onDismiss: () -> Un
 @Composable
 private fun V05ExercisePicker(exercises: List<Exercise>, title: String, onDismiss: () -> Unit, onPick: (Exercise) -> Unit) {
     var query by remember { mutableStateOf("") }
-    val filtered = exercises
-        .filter { query.isBlank() || it.name.contains(query, true) || it.category.contains(query, true) || it.equipment.contains(query, true) }
+    val filtered = exercises.filter { query.isBlank() || it.name.contains(query, true) || it.category.contains(query, true) || it.equipment.contains(query, true) }
         .sortedWith(compareByDescending<Exercise> { it.favorite }.thenBy { it.category }.thenBy { it.name })
-
     Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            color = SurfaceHigh,
-            shape = RoundedCornerShape(26.dp),
-            border = BorderStroke(1.dp, OutlineSoft),
-            modifier = Modifier.fillMaxWidth().heightIn(max = 620.dp)
-        ) {
+        Surface(color = SurfaceHigh, shape = RoundedCornerShape(26.dp), border = BorderStroke(1.dp, OutlineSoft), modifier = Modifier.fillMaxWidth().heightIn(max = 620.dp)) {
             Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(title.uppercase(), color = Color.White, fontWeight = FontWeight.Black, fontSize = 19.sp, modifier = Modifier.weight(1f))
                     TextButton(onClick = onDismiss) { Text("CLOSE", color = Muted) }
                 }
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    placeholder = { Text("Search name, muscle or equipment") }
-                )
+                OutlinedTextField(value = query, onValueChange = { query = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, placeholder = { Text("Search name, muscle or equipment") })
                 Column(Modifier.fillMaxWidth().weight(1f, fill = false).verticalScroll(rememberScrollState())) {
                     filtered.forEach { ex ->
-                        Row(
-                            Modifier.fillMaxWidth().clickable { onPick(ex) }.padding(horizontal = 5.dp, vertical = 11.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
+                        Row(Modifier.fillMaxWidth().clickable { onPick(ex) }.padding(horizontal = 5.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text("${if (ex.favorite) "★ " else ""}${ex.name}", color = Color.White, fontWeight = FontWeight.Bold)
                                 Text("${ex.category} • ${ex.equipment}", color = Muted, fontSize = 11.sp)
                             }
-                            Text("ADD", color = Accent, fontSize = 10.sp, fontWeight = FontWeight.Black)
+                            Text(if (title.startsWith("Replace", true)) "USE" else "ADD", color = Accent, fontSize = 10.sp, fontWeight = FontWeight.Black)
                         }
                         HorizontalDivider(color = OutlineSoft)
                     }
