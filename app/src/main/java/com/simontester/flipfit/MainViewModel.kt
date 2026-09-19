@@ -102,6 +102,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun previous(exerciseId: Long): List<PreviousSet> = _active.value?.let { db.previousSets(exerciseId, it.id) } ?: emptyList()
     fun prStatus(exerciseId: Long, weight: Double, reps: Int): PrStatus = db.prStatus(exerciseId, weight, reps)
     fun personalBests(): List<ExerciseBest> = db.personalBests()
+    fun updateHistorySet(setId: Long, weight: Double, reps: Int) { db.updateHistorySet(setId, weight, reps); refresh() }
+    fun deleteHistorySet(setId: Long) { db.deleteHistorySet(setId); refresh() }
+    fun renameHistoryWorkout(sessionId: Long, name: String) { db.renameHistoryWorkout(sessionId, name); refresh() }
+    fun deleteHistoryWorkout(sessionId: Long) { db.deleteHistoryWorkout(sessionId); refresh() }
 
     fun saveExercise(draft: ExerciseDraft) { db.saveExercise(draft); refresh() }
     fun duplicateExercise(exerciseId: Long) { db.duplicateExercise(exerciseId); refresh() }

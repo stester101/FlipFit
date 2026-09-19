@@ -19,6 +19,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -104,13 +105,20 @@ private fun BottomNav(selected: AppPage, onSelect: (AppPage) -> Unit) {
 
 @Composable
 private fun GlassCard(modifier: Modifier = Modifier, lime: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
-    Surface(
-        modifier = modifier,
-        color = if (lime) Color(0xDD151A12) else Glass,
-        shape = RoundedCornerShape(22.dp),
-        border = BorderStroke(1.dp, if (lime) Color(0x554C6A28) else OutlineSoft),
-        shadowElevation = 5.dp
-    ) { Column(Modifier.padding(16.dp), content = content) }
+    Box(modifier = modifier) {
+        Box(
+            Modifier.matchParentSize()
+                .clip(RoundedCornerShape(26.dp))
+                .background(if (lime) LiquidLimeBrush else LiquidGlassBrush)
+        )
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = Color.Transparent,
+            shape = RoundedCornerShape(26.dp),
+            border = BorderStroke(1.dp, if (lime) GlassLimeEdge else GlassEdge),
+            shadowElevation = 10.dp
+        ) { Column(Modifier.padding(17.dp), content = content) }
+    }
 }
 
 @Composable
@@ -366,21 +374,101 @@ private fun HistoryHub(vm: MainViewModel, history: List<WorkoutSession>) {
             Column(Modifier.weight(1f)) { Text(if (prs) "Personal Records" else "History", color = Color.White, fontSize = 27.sp, fontWeight = FontWeight.Black); Text(if (prs) "Your strongest recorded sets" else "Your completed sessions", color = Muted, fontSize = 12.sp) }
             FilterChip(selected = prs, onClick = { prs = !prs }, label = { Text(if (prs) "WORKOUTS" else "PRS") })
         }
-        if (prs) PrsScreen(vm, history, embedded = true) else HistoryScreen(history, embedded = true)
+        if (prs) PrsScreen(vm, history, embedded = true) else HistoryScreen(vm, history, embedded = true)
     }
 }
 
 @Composable
-private fun HistoryScreen(history: List<WorkoutSession>, embedded: Boolean = false) {
+private fun HistoryScreen(vm: MainViewModel, history: List<WorkoutSession>, embedded: Boolean = false) {
     var selected by remember { mutableStateOf<WorkoutSession?>(null) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = if (embedded) 0.dp else 20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) { if (!embedded) PageHeader("History", "Your completed sessions"); if (history.isEmpty()) Text("No workouts yet.", color = Muted); history.forEach { session -> HistoryCard(session) { selected = session } }; Spacer(Modifier.height(8.dp)) }
-    selected?.let { HistoryDetailDialog(it) { selected = null } }
+    selected?.let { session ->
+        val fresh = history.firstOrNull { it.id == session.id }
+        if (fresh == null) selected = null
+        else HistoryDetailDialog(
+            session = fresh,
+            onDismiss = { selected = null },
+            onRename = { vm.renameHistoryWorkout(fresh.id, it) },
+            onEditSet = { setId, weight, reps -> vm.updateHistorySet(setId, weight, reps) },
+            onDeleteSet = { setId -> vm.deleteHistorySet(setId) },
+            onDeleteWorkout = { vm.deleteHistoryWorkout(fresh.id); selected = null }
+        )
+    }
 }
 
 @Composable
-private fun HistoryDetailDialog(session: WorkoutSession, onDismiss: () -> Unit) {
-    val logged = session.exercises.sumOf { e -> e.sets.count { !it.skipped } }; val skipped = session.exercises.sumOf { e -> e.sets.count { it.skipped } }; val volume = session.exercises.sumOf { e -> e.sets.filter { !it.skipped }.sumOf { it.weightKg * it.reps } }
-    Dialog(onDismissRequest = onDismiss) { Surface(color = SurfaceHigh, shape = RoundedCornerShape(24.dp), border = BorderStroke(1.dp, OutlineSoft), modifier = Modifier.fillMaxWidth().heightIn(max = 650.dp)) { Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) { Text(session.name, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Black); Text("$logged logged • $skipped skipped • ${fmt(volume)}kg volume", color = Muted); session.exercises.forEach { e -> SectionLabel(e.exercise.name.uppercase()); if (e.sets.isEmpty()) Text("No sets", color = Muted) else e.sets.sortedBy { it.setNumber }.forEach { set -> Text(if (set.skipped) "Set ${set.setNumber} — SKIPPED" else if (e.exercise.trackingType == "reps_only") "Set ${set.setNumber} — ${set.reps} reps" else "Set ${set.setNumber} — ${fmt(set.weightKg)}kg × ${set.reps}${if (set.isPr) " • PR" else ""}", color = if (set.isPr) Accent else Color.White) } }; Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("DONE", color = Color.Black, fontWeight = FontWeight.Black) } } } }
+private fun HistoryDetailDialog(
+    session: WorkoutSession,
+    onDismiss: () -> Unit,
+    onRename: (String) -> Unit,
+    onEditSet: (Long, Double, Int) -> Unit,
+    onDeleteSet: (Long) -> Unit,
+    onDeleteWorkout: () -> Unit
+) {
+    val logged = session.exercises.sumOf { e -> e.sets.count { !it.skipped } }
+    val skipped = session.exercises.sumOf { e -> e.sets.count { it.skipped } }
+    val volume = session.exercises.sumOf { e -> e.sets.filter { !it.skipped }.sumOf { it.weightKg * it.reps } }
+    var rename by remember(session.id, session.name) { mutableStateOf(session.name) }
+    var editing by remember { mutableStateOf<Pair<LoggedSet, Exercise>?>(null) }
+    var deleteSet by remember { mutableStateOf<LoggedSet?>(null) }
+    var confirmDeleteWorkout by remember { mutableStateOf(false) }
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(color = GlassDeep, shape = RoundedCornerShape(30.dp), border = BorderStroke(1.dp, GlassEdge), modifier = Modifier.fillMaxWidth().heightIn(max = 690.dp), shadowElevation = 18.dp) {
+            Column(Modifier.verticalScroll(rememberScrollState()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                SectionLabel("WORKOUT DETAILS")
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(rename, { rename = it }, modifier = Modifier.weight(1f), singleLine = true, label = { Text("Workout name") })
+                    TextButton(onClick = { if (rename.isNotBlank()) onRename(rename.trim()) }) { Text("SAVE", color = Accent, fontWeight = FontWeight.Black) }
+                }
+                Text("$logged logged • $skipped skipped • ${fmt(volume)}kg volume", color = Muted)
+                session.exercises.forEach { e ->
+                    SectionLabel(e.exercise.name.uppercase())
+                    if (e.sets.isEmpty()) Text("No sets", color = Muted)
+                    else e.sets.sortedBy { it.setNumber }.forEach { set ->
+                        Surface(color = GlassSoft, shape = RoundedCornerShape(17.dp), border = BorderStroke(1.dp, GlassEdge), modifier = Modifier.fillMaxWidth()) {
+                            Row(Modifier.padding(horizontal = 13.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    if (set.skipped) "Set ${set.setNumber}  •  SKIPPED"
+                                    else if (e.exercise.trackingType == "reps_only") "Set ${set.setNumber}  •  ${set.reps} reps"
+                                    else "Set ${set.setNumber}  •  ${fmt(set.weightKg)}kg × ${set.reps}${if (set.isPr) "  •  PR" else ""}",
+                                    color = if (set.isPr) Accent else Color.White, modifier = Modifier.weight(1f), fontWeight = FontWeight.SemiBold
+                                )
+                                if (!set.skipped) TextButton(onClick = { editing = set to e.exercise }) { Text("EDIT", color = Accent, fontSize = 10.sp, fontWeight = FontWeight.Black) }
+                                TextButton(onClick = { deleteSet = set }) { Text("×", color = Danger, fontSize = 18.sp) }
+                            }
+                        }
+                    }
+                }
+                OutlinedButton(onClick = { confirmDeleteWorkout = true }, modifier = Modifier.fillMaxWidth(), border = BorderStroke(1.dp, Color(0x66FF7474))) { Text("DELETE WORKOUT", color = Danger, fontWeight = FontWeight.Bold) }
+                Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("DONE", color = Color.Black, fontWeight = FontWeight.Black) }
+            }
+        }
+    }
+    editing?.let { (set, exercise) ->
+        HistorySetEditDialog(set, exercise, { editing = null }) { weight, reps -> onEditSet(set.id, weight, reps); editing = null }
+    }
+    deleteSet?.let { set ->
+        AlertDialog(onDismissRequest = { deleteSet = null }, containerColor = GlassDeep, title = { Text("Delete set?") }, text = { Text("This removes the set from this old workout and recalculates PR markers.") }, confirmButton = { TextButton(onClick = { onDeleteSet(set.id); deleteSet = null }) { Text("DELETE", color = Danger) } }, dismissButton = { TextButton(onClick = { deleteSet = null }) { Text("CANCEL") } })
+    }
+    if (confirmDeleteWorkout) AlertDialog(onDismissRequest = { confirmDeleteWorkout = false }, containerColor = GlassDeep, title = { Text("Delete workout?") }, text = { Text("This permanently removes this workout and all its logged sets.") }, confirmButton = { TextButton(onClick = { confirmDeleteWorkout = false; onDeleteWorkout() }) { Text("DELETE", color = Danger) } }, dismissButton = { TextButton(onClick = { confirmDeleteWorkout = false }) { Text("CANCEL") } })
+}
+
+@Composable
+private fun HistorySetEditDialog(set: LoggedSet, exercise: Exercise, onDismiss: () -> Unit, onSave: (Double, Int) -> Unit) {
+    var weight by remember(set.id) { mutableStateOf(fmt(set.weightKg)) }
+    var reps by remember(set.id) { mutableStateOf(set.reps.toString()) }
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(color = GlassDeep, shape = RoundedCornerShape(28.dp), border = BorderStroke(1.dp, GlassEdge), modifier = Modifier.fillMaxWidth(), shadowElevation = 18.dp) {
+            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                SectionLabel("EDIT SET ${set.setNumber}")
+                Text(exercise.name, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Black)
+                if (exercise.trackingType != "reps_only") OutlinedTextField(weight, { weight = it }, label = { Text("Weight (kg)") }, modifier = Modifier.fillMaxWidth(), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+                OutlinedTextField(reps, { reps = it }, label = { Text("Reps") }, modifier = Modifier.fillMaxWidth(), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+                Button(onClick = { onSave(if (exercise.trackingType == "reps_only") 0.0 else (weight.toDoubleOrNull() ?: set.weightKg), reps.toIntOrNull() ?: set.reps) }, modifier = Modifier.fillMaxWidth()) { Text("SAVE CHANGES", color = Color.Black, fontWeight = FontWeight.Black) }
+                TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("CANCEL", color = Muted) }
+            }
+        }
+    }
 }
 
 @Composable

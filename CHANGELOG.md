@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.0 — 2026-09-19
+- Fixed starter-template deletion so deleted built-in templates stay deleted instead of being silently reseeded.
+- Added editing of completed workouts: rename old workouts and edit logged weight/reps.
+- Added deletion of individual historical sets with confirmation.
+- Added deletion of complete historical workouts with confirmation.
+- Recalculates PR markers after historical edits/deletions so records stay consistent.
+- Strengthened the visual system with more modern translucent liquid-glass cards, brighter glass edges, deeper modal glass and softer layered surfaces.
+- Preserved the cover-first workout flow and all v0.5 workout controls.
+- Bumped Android build to versionCode 7 / versionName 0.6.0.
+
+
 ## 0.5.0 — 2026-09-12
 - Restored the missing full-screen workout actions menu on unfolded devices.
 - Added unfolded workout action parity with cover mode: skip set/exercise, add/remove planned sets, add/replace/reorder exercises, undo and finish workout.

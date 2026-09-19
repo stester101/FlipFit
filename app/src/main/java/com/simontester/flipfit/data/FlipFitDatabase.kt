@@ -100,15 +100,20 @@ class FlipFitDatabase(context: Context) : SQLiteOpenHelper(context, "flipfit.db"
             }
         }
 
-        ensureTemplate(db, "CHEST + ARMS", listOf("Dumbbell Bench Press","Incline Dumbbell Press","Dumbbell Curl","Hammer Curl","Dumbbell Tricep Extension"))
-        ensureTemplate(db, "PUSH", listOf("Dumbbell Bench Press","Incline Dumbbell Press","Dumbbell Shoulder Press","Lateral Raise","Tricep Pushdown"))
-        ensureTemplate(db, "PULL", listOf("Lat Pulldown","Seated Cable Row","One-Arm Dumbbell Row","Dumbbell Curl","Hammer Curl"))
-        ensureTemplate(db, "LEGS", listOf("Goblet Squat","Romanian Deadlift","Leg Press","Leg Curl","Calf Raise"))
-        ensureTemplate(db, "UPPER BODY", listOf("Dumbbell Bench Press","Lat Pulldown","Dumbbell Shoulder Press","Seated Cable Row","Dumbbell Curl","Tricep Pushdown"))
-        ensureTemplate(db, "FULL BODY", listOf("Goblet Squat","Dumbbell Bench Press","One-Arm Dumbbell Row","Dumbbell Shoulder Press","Romanian Deadlift"))
+        ensureStarterTemplate(db, "CHEST + ARMS", listOf("Dumbbell Bench Press","Incline Dumbbell Press","Dumbbell Curl","Hammer Curl","Dumbbell Tricep Extension"))
+        ensureStarterTemplate(db, "PUSH", listOf("Dumbbell Bench Press","Incline Dumbbell Press","Dumbbell Shoulder Press","Lateral Raise","Tricep Pushdown"))
+        ensureStarterTemplate(db, "PULL", listOf("Lat Pulldown","Seated Cable Row","One-Arm Dumbbell Row","Dumbbell Curl","Hammer Curl"))
+        ensureStarterTemplate(db, "LEGS", listOf("Goblet Squat","Romanian Deadlift","Leg Press","Leg Curl","Calf Raise"))
+        ensureStarterTemplate(db, "UPPER BODY", listOf("Dumbbell Bench Press","Lat Pulldown","Dumbbell Shoulder Press","Seated Cable Row","Dumbbell Curl","Tricep Pushdown"))
+        ensureStarterTemplate(db, "FULL BODY", listOf("Goblet Squat","Dumbbell Bench Press","One-Arm Dumbbell Row","Dumbbell Shoulder Press","Romanian Deadlift"))
     }
 
-    private fun ensureTemplate(db: SQLiteDatabase, name: String, exerciseNames: List<String>) {
+    private fun ensureStarterTemplate(db: SQLiteDatabase, name: String, exerciseNames: List<String>) {
+        // Starter templates are seeded once. A tombstone keeps a deliberately deleted
+        // starter from being silently recreated on the next app/database refresh.
+        db.execSQL("CREATE TABLE IF NOT EXISTS deleted_starter_template(name TEXT PRIMARY KEY COLLATE NOCASE)")
+        val deleted = db.rawQuery("SELECT 1 FROM deleted_starter_template WHERE lower(name)=lower(?) LIMIT 1", arrayOf(name)).use { it.moveToFirst() }
+        if (deleted) return
         val exists = db.rawQuery("SELECT id FROM workout_template WHERE lower(name)=lower(?) LIMIT 1", arrayOf(name)).use { it.moveToFirst() }
         if (exists) return
         val templateId = db.insert("workout_template", null, ContentValues().apply { put("name", name) })
@@ -203,8 +208,83 @@ class FlipFitDatabase(context: Context) : SQLiteOpenHelper(context, "flipfit.db"
 
     fun deleteTemplate(templateId: Long) {
         val db = writableDatabase
-        db.delete("template_exercise", "template_id=?", arrayOf(templateId.toString()))
-        db.delete("workout_template", "id=?", arrayOf(templateId.toString()))
+        db.beginTransaction()
+        try {
+            db.execSQL("CREATE TABLE IF NOT EXISTS deleted_starter_template(name TEXT PRIMARY KEY COLLATE NOCASE)")
+            val name = db.rawQuery("SELECT name FROM workout_template WHERE id=? LIMIT 1", arrayOf(templateId.toString())).use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            }
+            if (name != null) db.insertWithOnConflict(
+                "deleted_starter_template", null,
+                ContentValues().apply { put("name", name) },
+                SQLiteDatabase.CONFLICT_REPLACE
+            )
+            db.delete("template_exercise", "template_id=?", arrayOf(templateId.toString()))
+            db.delete("workout_template", "id=?", arrayOf(templateId.toString()))
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+    }
+
+    fun updateHistorySet(setId: Long, weightKg: Double, reps: Int) {
+        val db = writableDatabase
+        db.update("workout_set", ContentValues().apply {
+            put("weight_kg", weightKg.coerceAtLeast(0.0))
+            put("reps", reps.coerceAtLeast(0))
+            put("skipped", 0)
+            put("is_pr", 0)
+        }, "id=?", arrayOf(setId.toString()))
+        recalculatePrFlags(db)
+    }
+
+    fun deleteHistorySet(setId: Long) {
+        val db = writableDatabase
+        db.delete("workout_set", "id=?", arrayOf(setId.toString()))
+        recalculatePrFlags(db)
+    }
+
+    fun renameHistoryWorkout(sessionId: Long, name: String) {
+        if (name.isBlank()) return
+        writableDatabase.update("workout_session", ContentValues().apply { put("name", name.trim()) }, "id=?", arrayOf(sessionId.toString()))
+    }
+
+    fun deleteHistoryWorkout(sessionId: Long) {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            val exerciseRows = mutableListOf<Long>()
+            db.rawQuery("SELECT id FROM workout_exercise WHERE session_id=?", arrayOf(sessionId.toString())).use { cursor ->
+                while (cursor.moveToNext()) exerciseRows += cursor.getLong(0)
+            }
+            exerciseRows.forEach { id -> db.delete("workout_set", "workout_exercise_id=?", arrayOf(id.toString())) }
+            db.delete("workout_exercise", "session_id=?", arrayOf(sessionId.toString()))
+            db.delete("workout_session", "id=?", arrayOf(sessionId.toString()))
+            recalculatePrFlags(db)
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+    }
+
+    private fun recalculatePrFlags(db: SQLiteDatabase) {
+        db.execSQL("UPDATE workout_set SET is_pr=0")
+        val exerciseIds = mutableListOf<Long>()
+        db.rawQuery("SELECT DISTINCT exercise_id FROM workout_exercise", null).use { cursor ->
+            while (cursor.moveToNext()) exerciseIds += cursor.getLong(0)
+        }
+        exerciseIds.forEach { exerciseId ->
+            var bestWeight = -1.0
+            var bestReps = -1
+            db.rawQuery(
+                "SELECT s.id,s.weight_kg,s.reps FROM workout_set s JOIN workout_exercise we ON we.id=s.workout_exercise_id JOIN workout_session ws ON ws.id=we.session_id WHERE we.exercise_id=? AND s.skipped=0 AND ws.ended_at IS NOT NULL ORDER BY s.logged_at,s.id",
+                arrayOf(exerciseId.toString())
+            ).use { cursor ->
+                while (cursor.moveToNext()) {
+                    val id = cursor.getLong(0); val weight = cursor.getDouble(1); val reps = cursor.getInt(2)
+                    if (weight > bestWeight || (weight == bestWeight && reps > bestReps)) {
+                        db.update("workout_set", ContentValues().apply { put("is_pr", 1) }, "id=?", arrayOf(id.toString()))
+                        bestWeight = weight; bestReps = reps
+                    }
+                }
+            }
+        }
     }
 
     fun duplicateTemplate(templateId: Long): Long {
