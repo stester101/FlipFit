@@ -10,15 +10,24 @@ val Accent = Color(0xFFB7FF39)
 val Bg = Color(0xFF080909)
 val Surface = Color(0xFF141616)
 val SurfaceHigh = Color(0xFF1A1D1D)
-val Glass = Color(0xCC151818)
-val GlassSoft = Color(0x99191C1C)
-val OutlineSoft = Color(0xFF303434)
+val Glass = Color(0xB8181C1C)
+val GlassSoft = Color(0x801C2221)
+val GlassDeep = Color(0xF0191D1D)
+val GlassEdge = Color(0x52FFFFFF)
+val GlassLimeEdge = Color(0x66B7FF39)
+val OutlineSoft = Color(0xFF343A39)
 val Muted = Color(0xFF969C9C)
 val MutedLow = Color(0xFF676D6D)
 val Danger = Color(0xFFFF7474)
 
 val LimeGlassBrush = Brush.linearGradient(
     listOf(Color(0x331A2610), Color(0x111A1E17), Color(0x22151A12))
+)
+val LiquidGlassBrush = Brush.linearGradient(
+    listOf(Color(0xD9282E2D), Color(0xA8141818), Color(0xC91C2221))
+)
+val LiquidLimeBrush = Brush.linearGradient(
+    listOf(Color(0xCC1C2814), Color(0xA8141A17), Color(0xC71B2119))
 )
 
 @Composable fun FlipFitTheme(content: @Composable () -> Unit) {
