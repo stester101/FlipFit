@@ -121,6 +121,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun createTemplate(name: String) { db.createTemplate(name); refresh() }
     fun renameTemplate(templateId: Long, name: String) { db.renameTemplate(templateId, name); refresh() }
+    fun archiveTemplate(templateId: Long) { db.archiveTemplate(templateId); refresh() }
     fun deleteTemplate(templateId: Long) { db.deleteTemplate(templateId); refresh() }
     fun duplicateTemplate(templateId: Long) { db.duplicateTemplate(templateId); refresh() }
     fun addTemplateExercise(templateId: Long, exerciseId: Long) { db.addTemplateExercise(templateId, exerciseId); refresh() }
