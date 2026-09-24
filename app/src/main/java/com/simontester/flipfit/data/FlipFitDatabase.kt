@@ -281,6 +281,10 @@ class FlipFitDatabase(private val context: Context) : SQLiteOpenHelper(context, 
         writableDatabase.update("workout_template", ContentValues().apply { put("name", name) }, "id=?", arrayOf(templateId.toString()))
     }
 
+    fun archiveTemplate(templateId: Long) {
+        writableDatabase.update("workout_template", ContentValues().apply { put("archived",1) }, "id=?", arrayOf(templateId.toString()))
+    }
+
     fun deleteTemplate(templateId: Long) {
         val db = writableDatabase
         db.beginTransaction()
