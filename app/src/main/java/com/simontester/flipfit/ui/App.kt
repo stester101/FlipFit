@@ -363,6 +363,7 @@ private fun ExercisesScreen(vm: MainViewModel, exercises: List<Exercise>, muscle
     editing?.let { ex -> ExerciseEditorDialog(ex, muscleGroups, equipment, { editing = null }, { vm.saveExercise(it); editing = null }, vm::addMuscleGroup, vm::addEquipment, { vm.duplicateExercise(ex.id); editing = null }, { vm.deleteExercise(ex.id); editing = null }) }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ExerciseEditorDialog(exercise: Exercise?, muscleGroups: List<LibraryAsset>, equipmentAssets: List<LibraryAsset>, onDismiss: () -> Unit, onSave: (ExerciseDraft) -> Unit, onAddMuscle: (String)->Unit, onAddEquipment:(String)->Unit, onDuplicate: (() -> Unit)? = null, onDelete: (() -> Unit)? = null) {
     var name by remember(exercise?.id) { mutableStateOf(exercise?.name ?: "") }
