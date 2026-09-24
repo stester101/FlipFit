@@ -38,3 +38,5 @@ jobs:
           path: FlipFit-v0.7.0-debug.apk
           if-no-files-found: error
           retention-days: 30
+
+# v0.7.0 final verification
