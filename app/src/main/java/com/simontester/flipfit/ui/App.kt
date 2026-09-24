@@ -409,6 +409,36 @@ private fun ExerciseEditorDialog(exercise: Exercise?, muscleGroups: List<Library
 }
 
 @Composable
+private fun ProgramsScreen(vm: MainViewModel, programs: List<WorkoutProgram>, templates: List<WorkoutTemplate>, exercises: List<Exercise>) {
+    var selected by remember{mutableStateOf<WorkoutProgram?>(null)}; var creating by remember{mutableStateOf(false)}; var showTemplates by remember{mutableStateOf(false)}
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),verticalArrangement=Arrangement.spacedBy(12.dp)){
+        PageHeader("Programs","Programs contain reusable workout templates","NEW"){creating=true}
+        programs.forEach{p-> GlassCard(Modifier.fillMaxWidth().clickable{selected=p},lime=p.name.equals("Bulk",true)){
+            Row(verticalAlignment=Alignment.CenterVertically){Column(Modifier.weight(1f)){Text(p.name,color=Color.White,fontSize=20.sp,fontWeight=FontWeight.Black);Text("${p.templates.size} sessions",color=Muted,fontSize=11.sp);vm.nextTemplate(p)?.let{Text("UP NEXT • ${it.name}",color=Accent,fontSize=11.sp,fontWeight=FontWeight.Bold)}};Text("OPEN",color=Accent,fontSize=10.sp,fontWeight=FontWeight.Black)}
+        }}
+        OutlinedButton(onClick={showTemplates=true},modifier=Modifier.fillMaxWidth()){Text("MANAGE TEMPLATE LIBRARY",color=Muted)}
+    }
+    if(creating) TextEntryDialog("New program","",{creating=false}){if(it.isNotBlank())vm.createProgram(it);creating=false}
+    selected?.let{p->ProgramEditorDialog(p,templates,{selected=null},{vm.renameProgram(p.id,it)},{vm.duplicateProgram(p.id);selected=null},{vm.archiveProgram(p.id);selected=null},{vm.addTemplateToProgram(p.id,it)},{vm.removeTemplateFromProgram(p.id,it)},{t->vm.start(t)})}
+    if(showTemplates) Dialog(onDismissRequest={showTemplates=false}){Surface(color=Bg,modifier=Modifier.fillMaxSize()){TemplatesScreen(vm,templates,exercises)}}
+}
+
+@Composable
+private fun ProgramEditorDialog(program:WorkoutProgram, allTemplates:List<WorkoutTemplate>, onDismiss:()->Unit,onRename:(String)->Unit,onDuplicate:()->Unit,onArchive:()->Unit,onAdd:(Long)->Unit,onRemove:(Long)->Unit,onStart:(WorkoutTemplate)->Unit){
+    var name by remember(program.id,program.name){mutableStateOf(program.name)};var add by remember{mutableStateOf(false)};var confirmArchive by remember{mutableStateOf(false)};var removeId by remember{mutableStateOf<Long?>(null)}
+    Dialog(onDismissRequest=onDismiss){Surface(color=GlassDeep,shape=RoundedCornerShape(28.dp),border=BorderStroke(1.dp,GlassEdge),modifier=Modifier.fillMaxWidth().heightIn(max=680.dp)){Column(Modifier.verticalScroll(rememberScrollState()).padding(18.dp),verticalArrangement=Arrangement.spacedBy(10.dp)){
+        SectionLabel("PROGRAM");Row(verticalAlignment=Alignment.CenterVertically){OutlinedTextField(name,{name=it},modifier=Modifier.weight(1f),singleLine=true);TextButton(onClick={onRename(name)}){Text("SAVE")}}
+        program.templates.sortedBy{it.orderIndex}.forEachIndexed{i,pt->GlassCard(Modifier.fillMaxWidth()){Text("SESSION ${i+1}",color=Muted,fontSize=9.sp,fontWeight=FontWeight.Black);Text(pt.template.name,color=Color.White,fontWeight=FontWeight.Black);Text(pt.template.exercises.joinToString(" • "){it.exercise.name},color=Muted,fontSize=10.sp,maxLines=2);Row{TextButton(onClick={onStart(pt.template);onDismiss()}){Text("START",color=Accent)};TextButton(onClick={removeId=pt.template.id}){Text("REMOVE",color=Danger)}}}}
+        Button(onClick={add=true},modifier=Modifier.fillMaxWidth()){Text("ADD TEMPLATE",color=Color.Black,fontWeight=FontWeight.Black)}
+        Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){OutlinedButton(onClick=onDuplicate,modifier=Modifier.weight(1f)){Text("DUPLICATE",color=Accent)};OutlinedButton(onClick={confirmArchive=true},modifier=Modifier.weight(1f)){Text("ARCHIVE",color=Danger)}}
+        TextButton(onClick=onDismiss,modifier=Modifier.fillMaxWidth()){Text("CLOSE",color=Muted)}
+    }}}
+    if(add) AlertDialog(onDismissRequest={add=false},containerColor=GlassDeep,title={Text("Add template")},text={Column(Modifier.heightIn(max=360.dp).verticalScroll(rememberScrollState())){allTemplates.filter{t->program.templates.none{it.template.id==t.id}}.forEach{t->TextButton(onClick={onAdd(t.id);add=false},modifier=Modifier.fillMaxWidth()){Text(t.name,color=Color.White,modifier=Modifier.fillMaxWidth())}}}},confirmButton={},dismissButton={TextButton(onClick={add=false}){Text("CANCEL")}})
+    removeId?.let{id->AlertDialog(onDismissRequest={removeId=null},containerColor=GlassDeep,title={Text("Remove template from program?")},text={Text("The template itself and workout history will not be deleted.")},confirmButton={TextButton(onClick={onRemove(id);removeId=null}){Text("REMOVE",color=Danger)}},dismissButton={TextButton(onClick={removeId=null}){Text("CANCEL")}})}
+    if(confirmArchive)AlertDialog(onDismissRequest={confirmArchive=false},containerColor=GlassDeep,title={Text("Archive program?")},text={Text("It will disappear from normal use. Its templates and workout history are preserved.")},confirmButton={TextButton(onClick={confirmArchive=false;onArchive()}){Text("ARCHIVE",color=Danger)}},dismissButton={TextButton(onClick={confirmArchive=false}){Text("CANCEL")}})
+}
+
+@Composable
 private fun TemplatesScreen(vm: MainViewModel, templates: List<WorkoutTemplate>, exercises: List<Exercise>) {
     var selectedId by remember { mutableStateOf<Long?>(null) }; var creating by remember { mutableStateOf(false) }; var addToTemplateId by remember { mutableStateOf<Long?>(null) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
