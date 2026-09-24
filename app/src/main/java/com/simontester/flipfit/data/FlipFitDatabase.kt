@@ -450,7 +450,7 @@ class FlipFitDatabase(private val context: Context) : SQLiteOpenHelper(context, 
     fun nextTemplateForProgram(program:WorkoutProgram): WorkoutTemplate? {
         val last = history().firstOrNull { h -> program.templates.any { it.template.id == h.templateId } }
         if(last==null) return program.templates.minByOrNull{it.orderIndex}?.template
-        val pos=program.templates.indexOfFirst{it.template.id==last.templateId}; return program.templates.getOrNull((pos+1).coerceAtMost(program.templates.lastIndex))?.template ?: program.templates.firstOrNull()?.template
+        val pos=program.templates.indexOfFirst{it.template.id==last.templateId}; val next=if(pos<0||pos>=program.templates.lastIndex)0 else pos+1; return program.templates.getOrNull(next)?.template
     }
 
     fun exportBackup(uri: Uri) {
