@@ -1,10 +1,13 @@
 package com.simontester.flipfit.ui
 
 import android.content.Context
+import android.content.Intent
 import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -33,6 +36,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import coil.compose.AsyncImage
 import com.simontester.flipfit.BuildConfig
 import com.simontester.flipfit.MainActivity
 import com.simontester.flipfit.MainViewModel
@@ -44,7 +48,7 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
 
-private enum class AppPage { HOME, EXERCISES, TEMPLATES, HISTORY }
+private enum class AppPage { HOME, PROGRAMS, EXERCISES, HISTORY }
 
 @Composable
 fun FlipFitApp(vm: MainViewModel, compact: Boolean, wide: Boolean) {
@@ -52,18 +56,21 @@ fun FlipFitApp(vm: MainViewModel, compact: Boolean, wide: Boolean) {
     val templates by vm.templates.collectAsState()
     val exercises by vm.exercises.collectAsState()
     val history by vm.history.collectAsState()
+    val programs by vm.programs.collectAsState()
+    val muscleGroups by vm.muscleGroups.collectAsState()
+    val equipment by vm.equipment.collectAsState()
     val completion by vm.completion.collectAsState()
     val context = LocalContext.current
     LaunchedEffect(active, vm.settings.keepAwake) { (context as? MainActivity)?.applyKeepAwake(active != null && vm.settings.keepAwake) }
     when {
         completion != null -> CompletionScreen(completion!!, compact) { vm.clearCompletion() }
         active != null -> WorkoutScreen(vm, active!!, exercises, compact)
-        else -> HomeShell(vm, templates, exercises, history, compact)
+        else -> HomeShell(vm, programs, templates, exercises, history, muscleGroups, equipment, compact)
     }
 }
 
 @Composable
-private fun HomeShell(vm: MainViewModel, templates: List<WorkoutTemplate>, exercises: List<Exercise>, history: List<WorkoutSession>, compact: Boolean) {
+private fun HomeShell(vm: MainViewModel, programs: List<WorkoutProgram>, templates: List<WorkoutTemplate>, exercises: List<Exercise>, history: List<WorkoutSession>, muscleGroups: List<LibraryAsset>, equipment: List<LibraryAsset>, compact: Boolean) {
     if (compact) { CompactHome(vm, templates); return }
     var page by remember { mutableStateOf(AppPage.HOME) }
     Scaffold(
@@ -72,9 +79,9 @@ private fun HomeShell(vm: MainViewModel, templates: List<WorkoutTemplate>, exerc
     ) { inner ->
         Box(Modifier.fillMaxSize().padding(inner).background(Bg).safeDrawingPadding()) {
             when (page) {
-                AppPage.HOME -> HomeContent(vm, templates, history, onTemplates = { page = AppPage.TEMPLATES }, onHistory = { page = AppPage.HISTORY })
-                AppPage.EXERCISES -> ExercisesScreen(vm, exercises)
-                AppPage.TEMPLATES -> TemplatesScreen(vm, templates, exercises)
+                AppPage.HOME -> HomeContent(vm, templates, history, onTemplates = { page = AppPage.PROGRAMS }, onHistory = { page = AppPage.HISTORY })
+                AppPage.PROGRAMS -> ProgramsScreen(vm, programs, templates, exercises)
+                AppPage.EXERCISES -> ExercisesScreen(vm, exercises, muscleGroups, equipment)
                 AppPage.HISTORY -> HistoryHub(vm, history)
             }
         }
@@ -87,8 +94,8 @@ private fun BottomNav(selected: AppPage, onSelect: (AppPage) -> Unit) {
         Row(Modifier.fillMaxWidth().navigationBarsPadding().height(68.dp).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             listOf(
                 Triple(AppPage.HOME, "⌂", "HOME"),
+                Triple(AppPage.PROGRAMS, "▤", "PROGRAMS"),
                 Triple(AppPage.EXERCISES, "◇", "EXERCISES"),
-                Triple(AppPage.TEMPLATES, "▤", "TEMPLATES"),
                 Triple(AppPage.HISTORY, "◷", "HISTORY")
             ).forEach { (page, icon, label) ->
                 Column(
