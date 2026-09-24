@@ -5,18 +5,27 @@ import android.content.Context
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import android.net.Uri
+import java.io.File
 import com.simontester.flipfit.model.*
 import kotlin.math.max
 
-class FlipFitDatabase(context: Context) : SQLiteOpenHelper(context, "flipfit.db", null, 3) {
+class FlipFitDatabase(context: Context) : SQLiteOpenHelper(context, "flipfit.db", null, 4) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE exercise(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,category TEXT NOT NULL,equipment TEXT NOT NULL,notes TEXT NOT NULL DEFAULT '',tracking_type TEXT NOT NULL DEFAULT 'weight_reps',increment_kg REAL,favorite INTEGER NOT NULL DEFAULT 0,diagram_hint TEXT NOT NULL DEFAULT '',default_sets INTEGER NOT NULL DEFAULT 3,archived INTEGER NOT NULL DEFAULT 0)")
-        db.execSQL("CREATE TABLE workout_template(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL)")
-        db.execSQL("CREATE TABLE template_exercise(id INTEGER PRIMARY KEY AUTOINCREMENT,template_id INTEGER NOT NULL,exercise_id INTEGER NOT NULL,order_index INTEGER NOT NULL,default_sets INTEGER NOT NULL)")
+        db.execSQL("CREATE TABLE workout_template(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,archived INTEGER NOT NULL DEFAULT 0)")
+        db.execSQL("CREATE TABLE program(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,archived INTEGER NOT NULL DEFAULT 0)")
+        db.execSQL("CREATE TABLE program_template(id INTEGER PRIMARY KEY AUTOINCREMENT,program_id INTEGER NOT NULL,template_id INTEGER NOT NULL,order_index INTEGER NOT NULL)")
+        db.execSQL("CREATE TABLE muscle_group(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL UNIQUE COLLATE NOCASE)")
+        db.execSQL("CREATE TABLE equipment(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL UNIQUE COLLATE NOCASE)")
+        db.execSQL("CREATE TABLE template_exercise(id INTEGER PRIMARY KEY AUTOINCREMENT,template_id INTEGER NOT NULL,exercise_id INTEGER NOT NULL,order_index INTEGER NOT NULL,default_sets INTEGER NOT NULL,target_min_reps INTEGER,target_max_reps INTEGER,per_side INTEGER NOT NULL DEFAULT 0)")
         db.execSQL("CREATE TABLE workout_session(id INTEGER PRIMARY KEY AUTOINCREMENT,template_id INTEGER,name TEXT NOT NULL,started_at INTEGER NOT NULL,ended_at INTEGER,current_order_index INTEGER NOT NULL DEFAULT 0)")
         db.execSQL("CREATE TABLE workout_exercise(id INTEGER PRIMARY KEY AUTOINCREMENT,session_id INTEGER NOT NULL,exercise_id INTEGER NOT NULL,order_index INTEGER NOT NULL,target_sets INTEGER NOT NULL)")
         db.execSQL("CREATE TABLE workout_set(id INTEGER PRIMARY KEY AUTOINCREMENT,workout_exercise_id INTEGER NOT NULL,set_number INTEGER NOT NULL,weight_kg REAL NOT NULL,reps INTEGER NOT NULL,logged_at INTEGER NOT NULL,skipped INTEGER NOT NULL DEFAULT 0,is_pr INTEGER NOT NULL DEFAULT 0)")
         db.execSQL("CREATE UNIQUE INDEX idx_workout_set_unique ON workout_set(workout_exercise_id,set_number)")
+        db.execSQL("ALTER TABLE exercise ADD COLUMN secondary_muscles TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE exercise ADD COLUMN aliases TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE exercise ADD COLUMN image_uri TEXT NOT NULL DEFAULT ''")
         ensureCatalog(db)
     }
 
@@ -35,6 +44,19 @@ class FlipFitDatabase(context: Context) : SQLiteOpenHelper(context, "flipfit.db"
         if (oldVersion < 3) {
             db.execSQL("ALTER TABLE exercise ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
         }
+        if (oldVersion < 4) {
+            db.execSQL("ALTER TABLE exercise ADD COLUMN secondary_muscles TEXT NOT NULL DEFAULT ''")
+            db.execSQL("ALTER TABLE exercise ADD COLUMN aliases TEXT NOT NULL DEFAULT ''")
+            db.execSQL("ALTER TABLE exercise ADD COLUMN image_uri TEXT NOT NULL DEFAULT ''")
+            db.execSQL("ALTER TABLE workout_template ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE template_exercise ADD COLUMN target_min_reps INTEGER")
+            db.execSQL("ALTER TABLE template_exercise ADD COLUMN target_max_reps INTEGER")
+            db.execSQL("ALTER TABLE template_exercise ADD COLUMN per_side INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("CREATE TABLE IF NOT EXISTS program(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,archived INTEGER NOT NULL DEFAULT 0)")
+            db.execSQL("CREATE TABLE IF NOT EXISTS program_template(id INTEGER PRIMARY KEY AUTOINCREMENT,program_id INTEGER NOT NULL,template_id INTEGER NOT NULL,order_index INTEGER NOT NULL)")
+            db.execSQL("CREATE TABLE IF NOT EXISTS muscle_group(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL UNIQUE COLLATE NOCASE)")
+            db.execSQL("CREATE TABLE IF NOT EXISTS equipment(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL UNIQUE COLLATE NOCASE)")
+        }
         ensureCatalog(db)
     }
 
@@ -47,6 +69,12 @@ class FlipFitDatabase(context: Context) : SQLiteOpenHelper(context, "flipfit.db"
     )
 
     private fun ensureCatalog(db: SQLiteDatabase) {
+        listOf("Chest","Back","Shoulders","Biceps","Triceps","Quads","Hamstrings","Glutes","Calves","Core","Legs","Other").forEach { name ->
+            db.insertWithOnConflict("muscle_group", null, ContentValues().apply { put("name", name) }, SQLiteDatabase.CONFLICT_IGNORE)
+        }
+        listOf("Dumbbell","Barbell","Kettlebell","Cable","Machine","Smith Machine","Bodyweight","Bench","Bands","Leg Press","Other").forEach { name ->
+            db.insertWithOnConflict("equipment", null, ContentValues().apply { put("name", name) }, SQLiteDatabase.CONFLICT_IGNORE)
+        }
         val seeds = listOf(
             ExerciseSeed("Dumbbell Bench Press","Chest","Dumbbell",diagram="Start: dumbbells above chest, elbows softly bent. Finish: lower under control until elbows are just below the bench, then press back up."),
             ExerciseSeed("Incline Dumbbell Press","Chest","Dumbbell",diagram="Start: incline bench, dumbbells above upper chest. Finish: lower beside upper chest, then press up and slightly inward."),
@@ -106,6 +134,52 @@ class FlipFitDatabase(context: Context) : SQLiteOpenHelper(context, "flipfit.db"
         ensureStarterTemplate(db, "LEGS", listOf("Goblet Squat","Romanian Deadlift","Leg Press","Leg Curl","Calf Raise"))
         ensureStarterTemplate(db, "UPPER BODY", listOf("Dumbbell Bench Press","Lat Pulldown","Dumbbell Shoulder Press","Seated Cable Row","Dumbbell Curl","Tricep Pushdown"))
         ensureStarterTemplate(db, "FULL BODY", listOf("Goblet Squat","Dumbbell Bench Press","One-Arm Dumbbell Row","Dumbbell Shoulder Press","Romanian Deadlift"))
+        ensureBulkProgram(db)
+    }
+
+    private fun ensureBulkProgram(db: SQLiteDatabase) {
+        data class Item(val name:String,val sets:Int,val min:Int,val max:Int= min,val side:Boolean=false,val muscle:String,val equipment:String)
+        val sessions = listOf(
+            "Session 1 — Quads and Glutes" to listOf(
+                Item("Leg Extensions",3,15,muscle="Quads",equipment="Machine"), Item("Bulgarian Split Squats",3,15,side=true,muscle="Quads",equipment="Dumbbell"),
+                Item("Hack Squats",3,15,muscle="Quads",equipment="Machine"), Item("Dumbbell Step Ups",3,15,side=true,muscle="Glutes",equipment="Dumbbell"),
+                Item("Hip Thrusts",4,20,muscle="Glutes",equipment="Barbell"), Item("Cable Kick Backs",4,20,side=true,muscle="Glutes",equipment="Cable")),
+            "Session 2 — Chest and Back" to listOf(
+                Item("Machine Chest Press",3,12,muscle="Chest",equipment="Machine"), Item("Pec Deck",3,12,muscle="Chest",equipment="Machine"),
+                Item("DB Rows",3,12,side=true,muscle="Back",equipment="Dumbbell"), Item("Lat Pulldowns",3,12,muscle="Back",equipment="Cable"),
+                Item("Cable Seated Rows – Underhand Grip",3,12,muscle="Back",equipment="Cable"), Item("Seated Row Machine – Wide Grip",3,12,muscle="Back",equipment="Machine")),
+            "Session 3 — Hamstrings and Glutes" to listOf(
+                Item("Seated Leg Curls",3,12,muscle="Hamstrings",equipment="Machine"), Item("Laying Hamstring Curls",3,12,muscle="Hamstrings",equipment="Machine"),
+                Item("Dumbbell Stiff Leg Deadlifts",3,12,muscle="Hamstrings",equipment="Dumbbell"), Item("Sumo Deadlifts",3,12,muscle="Glutes",equipment="Barbell"),
+                Item("Glute Drive – Banded Abduction",3,12,muscle="Glutes",equipment="Bands"), Item("Cable Pull Throughs",3,12,muscle="Glutes",equipment="Cable")),
+            "Session 4 — Shoulders and Arms" to listOf(
+                Item("DB Shoulder Press",3,12,muscle="Shoulders",equipment="Dumbbell"), Item("DB Lateral Raises",3,12,muscle="Shoulders",equipment="Dumbbell"),
+                Item("DB Front Raises",3,12,muscle="Shoulders",equipment="Dumbbell"), Item("Rear Delt Fly",3,12,muscle="Shoulders",equipment="Dumbbell"),
+                Item("Hammer Curls",3,12,muscle="Biceps",equipment="Dumbbell"), Item("Skullcrushers",3,12,muscle="Triceps",equipment="Barbell")),
+            "Session 5 — Glutes and Calves – Heavy Day" to listOf(
+                Item("Smith Machine Sumo Squats",3,6,8,muscle="Glutes",equipment="Smith Machine"), Item("Good Mornings",3,6,8,muscle="Hamstrings",equipment="Barbell"),
+                Item("Wide Stance Leg Press",3,6,8,muscle="Glutes",equipment="Leg Press"), Item("Kickback Machine",3,6,8,true,muscle="Glutes",equipment="Machine"),
+                Item("Glute Bridges",3,15,20,true,muscle="Glutes",equipment="Bodyweight"), Item("Glute Machine",3,6,8,muscle="Glutes",equipment="Machine"),
+                Item("Calf Raises",4,25,muscle="Calves",equipment="Machine"), Item("Calf Presses on Leg Press",4,25,muscle="Calves",equipment="Leg Press"))
+        )
+        val templateIds = mutableListOf<Long>()
+        sessions.forEach { (templateName, items) ->
+            var tid = db.rawQuery("SELECT id FROM workout_template WHERE name=? LIMIT 1", arrayOf(templateName)).use { q -> if(q.moveToFirst()) q.getLong(0) else -1L }
+            if (tid < 0) tid = db.insert("workout_template", null, ContentValues().apply { put("name",templateName) })
+            if (db.rawQuery("SELECT 1 FROM template_exercise WHERE template_id=? LIMIT 1", arrayOf(tid.toString())).use { it.moveToFirst() }.not()) {
+                items.forEachIndexed { index, item ->
+                    var eid = db.rawQuery("SELECT id FROM exercise WHERE lower(name)=lower(?) LIMIT 1", arrayOf(item.name)).use { q -> if(q.moveToFirst()) q.getLong(0) else -1L }
+                    if(eid < 0) eid = db.insert("exercise",null,ContentValues().apply { put("name",item.name);put("category",item.muscle);put("equipment",item.equipment);put("default_sets",item.sets);put("archived",0) })
+                    db.insert("template_exercise",null,ContentValues().apply { put("template_id",tid);put("exercise_id",eid);put("order_index",index);put("default_sets",item.sets);put("target_min_reps",item.min);put("target_max_reps",item.max);put("per_side",if(item.side)1 else 0) })
+                }
+            }
+            templateIds += tid
+        }
+        var pid = db.rawQuery("SELECT id FROM program WHERE lower(name)='bulk' LIMIT 1",null).use { q -> if(q.moveToFirst()) q.getLong(0) else -1L }
+        if(pid < 0) pid = db.insert("program",null,ContentValues().apply { put("name","Bulk") })
+        if(db.rawQuery("SELECT 1 FROM program_template WHERE program_id=? LIMIT 1",arrayOf(pid.toString())).use { it.moveToFirst() }.not()) {
+            templateIds.forEachIndexed { i, tid -> db.insert("program_template",null,ContentValues().apply { put("program_id",pid);put("template_id",tid);put("order_index",i) }) }
+        }
     }
 
     private fun ensureStarterTemplate(db: SQLiteDatabase, name: String, exerciseNames: List<String>) {
