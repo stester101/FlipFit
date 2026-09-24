@@ -1,6 +1,7 @@
 package com.simontester.flipfit
 
 import android.app.Application
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import com.simontester.flipfit.data.FlipFitDatabase
 import com.simontester.flipfit.data.SettingsStore
@@ -11,6 +12,13 @@ import kotlinx.coroutines.flow.StateFlow
 class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val db = FlipFitDatabase(app)
     val settings = SettingsStore(app)
+
+    private val _programs = MutableStateFlow(db.programs())
+    val programs: StateFlow<List<WorkoutProgram>> = _programs
+    private val _muscleGroups = MutableStateFlow(db.muscleGroups())
+    val muscleGroups: StateFlow<List<LibraryAsset>> = _muscleGroups
+    private val _equipment = MutableStateFlow(db.equipment())
+    val equipment: StateFlow<List<LibraryAsset>> = _equipment
 
     private val _templates = MutableStateFlow(db.getTemplates())
     val templates: StateFlow<List<WorkoutTemplate>> = _templates
@@ -113,6 +121,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun createTemplate(name: String) { db.createTemplate(name); refresh() }
     fun renameTemplate(templateId: Long, name: String) { db.renameTemplate(templateId, name); refresh() }
+    fun archiveTemplate(templateId: Long) { db.archiveTemplate(templateId); refresh() }
     fun deleteTemplate(templateId: Long) { db.deleteTemplate(templateId); refresh() }
     fun duplicateTemplate(templateId: Long) { db.duplicateTemplate(templateId); refresh() }
     fun addTemplateExercise(templateId: Long, exerciseId: Long) { db.addTemplateExercise(templateId, exerciseId); refresh() }
@@ -120,10 +129,30 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun adjustTemplateSets(templateId: Long, exerciseId: Long, delta: Int) { db.adjustTemplateSets(templateId, exerciseId, delta); refresh() }
     fun moveTemplateExercise(templateId: Long, exerciseId: Long, direction: Int) { db.moveTemplateExercise(templateId, exerciseId, direction); refresh() }
 
+    fun setTemplateTarget(templateId:Long, exerciseId:Long, sets:Int, min:Int?, max:Int?, perSide:Boolean) { db.setTemplateExerciseTarget(templateId,exerciseId,sets,min,max,perSide); refresh() }
+    fun createProgram(name:String){ db.createProgram(name); refresh() }
+    fun renameProgram(id:Long,name:String){ db.renameProgram(id,name); refresh() }
+    fun archiveProgram(id:Long){ db.archiveProgram(id); refresh() }
+    fun duplicateProgram(id:Long){ db.duplicateProgram(id); refresh() }
+    fun addTemplateToProgram(programId:Long,templateId:Long){ db.addTemplateToProgram(programId,templateId); refresh() }
+    fun removeTemplateFromProgram(programId:Long,templateId:Long){ db.removeTemplateFromProgram(programId,templateId); refresh() }
+    fun nextTemplate(program:WorkoutProgram):WorkoutTemplate?=db.nextTemplateForProgram(program)
+    fun addMuscleGroup(name:String){db.addMuscleGroup(name);refresh()}
+    fun addEquipment(name:String){db.addEquipment(name);refresh()}
+    fun deleteMuscleGroup(id:Long){db.deleteMuscleGroup(id);refresh()}
+    fun deleteEquipment(id:Long){db.deleteEquipment(id);refresh()}
+    fun exportBackup(uri:Uri)=db.exportBackup(uri)
+    fun previewBackup(uri:Uri):ImportPreview=db.previewBackup(uri)
+    fun importBackup(uri:Uri){db.importBackup(uri);refresh()}
+    fun resetStarterContent(){db.resetStarterContent();refresh()}
+
     fun clearPrFlash() { _prFlash.value = false }
     fun clearCompletion() { _completion.value = null }
 
     private fun refresh() {
+        _programs.value = db.programs()
+        _muscleGroups.value = db.muscleGroups()
+        _equipment.value = db.equipment()
         _templates.value = db.getTemplates()
         _exercises.value = db.getAllExercises()
         _active.value = db.activeSession()

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.7.0 — 2026-09-24
+- Added Programs above Templates, with create/rename/duplicate/archive and reusable template membership.
+- Added verified default Bulk program with the five confirmed training sessions and structured rep-range/per-side targets.
+- Added full FlipFit database export/import so exercises, templates, programs and workout history survive reinstalls; import previews counts before replacement.
+- Template exercises are now individually editable for sets, rep targets/ranges and each-side status, with safe removal.
+- Added destructive-action confirmations across exercise/template/program/history management.
+- Added reusable muscle-group and equipment asset libraries with dropdown selection and create-new flows.
+- Added exercise aliases, primary/secondary muscle metadata and attachable persistent image/diagram URIs.
+- Added image rendering support for exercise artwork.
+- Added next-session logic for programs and explicit restore-starter-content control.
+- Database schema migrated to v4; backup format is the versioned SQLite database itself for future migration compatibility.
+
+
 ## 0.6.0 — 2026-09-19
 - Fixed starter-template deletion so deleted built-in templates stay deleted instead of being silently reseeded.
 - Added editing of completed workouts: rename old workouts and edit logged weight/reps.

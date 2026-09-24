@@ -1,10 +1,14 @@
 package com.simontester.flipfit.ui
 
 import android.content.Context
+import android.content.Intent
 import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.util.Base64
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -33,6 +37,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import coil.compose.AsyncImage
 import com.simontester.flipfit.BuildConfig
 import com.simontester.flipfit.MainActivity
 import com.simontester.flipfit.MainViewModel
@@ -44,7 +49,7 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
 
-private enum class AppPage { HOME, EXERCISES, TEMPLATES, HISTORY }
+private enum class AppPage { HOME, PROGRAMS, EXERCISES, HISTORY }
 
 @Composable
 fun FlipFitApp(vm: MainViewModel, compact: Boolean, wide: Boolean) {
@@ -52,18 +57,21 @@ fun FlipFitApp(vm: MainViewModel, compact: Boolean, wide: Boolean) {
     val templates by vm.templates.collectAsState()
     val exercises by vm.exercises.collectAsState()
     val history by vm.history.collectAsState()
+    val programs by vm.programs.collectAsState()
+    val muscleGroups by vm.muscleGroups.collectAsState()
+    val equipment by vm.equipment.collectAsState()
     val completion by vm.completion.collectAsState()
     val context = LocalContext.current
     LaunchedEffect(active, vm.settings.keepAwake) { (context as? MainActivity)?.applyKeepAwake(active != null && vm.settings.keepAwake) }
     when {
         completion != null -> CompletionScreen(completion!!, compact) { vm.clearCompletion() }
         active != null -> WorkoutScreen(vm, active!!, exercises, compact)
-        else -> HomeShell(vm, templates, exercises, history, compact)
+        else -> HomeShell(vm, programs, templates, exercises, history, muscleGroups, equipment, compact)
     }
 }
 
 @Composable
-private fun HomeShell(vm: MainViewModel, templates: List<WorkoutTemplate>, exercises: List<Exercise>, history: List<WorkoutSession>, compact: Boolean) {
+private fun HomeShell(vm: MainViewModel, programs: List<WorkoutProgram>, templates: List<WorkoutTemplate>, exercises: List<Exercise>, history: List<WorkoutSession>, muscleGroups: List<LibraryAsset>, equipment: List<LibraryAsset>, compact: Boolean) {
     if (compact) { CompactHome(vm, templates); return }
     var page by remember { mutableStateOf(AppPage.HOME) }
     Scaffold(
@@ -72,9 +80,9 @@ private fun HomeShell(vm: MainViewModel, templates: List<WorkoutTemplate>, exerc
     ) { inner ->
         Box(Modifier.fillMaxSize().padding(inner).background(Bg).safeDrawingPadding()) {
             when (page) {
-                AppPage.HOME -> HomeContent(vm, templates, history, onTemplates = { page = AppPage.TEMPLATES }, onHistory = { page = AppPage.HISTORY })
-                AppPage.EXERCISES -> ExercisesScreen(vm, exercises)
-                AppPage.TEMPLATES -> TemplatesScreen(vm, templates, exercises)
+                AppPage.HOME -> HomeContent(vm, templates, history, onTemplates = { page = AppPage.PROGRAMS }, onHistory = { page = AppPage.HISTORY })
+                AppPage.PROGRAMS -> ProgramsScreen(vm, programs, templates, exercises)
+                AppPage.EXERCISES -> ExercisesScreen(vm, exercises, muscleGroups, equipment)
                 AppPage.HISTORY -> HistoryHub(vm, history)
             }
         }
@@ -87,8 +95,8 @@ private fun BottomNav(selected: AppPage, onSelect: (AppPage) -> Unit) {
         Row(Modifier.fillMaxWidth().navigationBarsPadding().height(68.dp).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             listOf(
                 Triple(AppPage.HOME, "⌂", "HOME"),
+                Triple(AppPage.PROGRAMS, "▤", "PROGRAMS"),
                 Triple(AppPage.EXERCISES, "◇", "EXERCISES"),
-                Triple(AppPage.TEMPLATES, "▤", "TEMPLATES"),
                 Triple(AppPage.HISTORY, "◷", "HISTORY")
             ).forEach { (page, icon, label) ->
                 Column(
@@ -188,17 +196,36 @@ private fun SettingsDialog(vm: MainViewModel, onDismiss: () -> Unit) {
     var keepAwake by remember { mutableStateOf(vm.settings.keepAwake) }
     var haptics by remember { mutableStateOf(vm.settings.haptics) }
     var increment by remember { mutableFloatStateOf(vm.settings.incrementKg) }
+    var preview by remember { mutableStateOf<Pair<android.net.Uri, ImportPreview>?>(null) }
+    var message by remember { mutableStateOf<String?>(null) }
+    val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+        uri?.let { runCatching { vm.exportBackup(it); message = "Backup exported" }.onFailure { message = "Export failed: ${it.message}" } }
+    }
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let { runCatching { preview = it to vm.previewBackup(it) }.onFailure { message = "That file is not a valid FlipFit backup" } }
+    }
     Dialog(onDismissRequest = onDismiss) {
-        Surface(color = SurfaceHigh, shape = RoundedCornerShape(24.dp), border = BorderStroke(1.dp, OutlineSoft), modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Surface(color = GlassDeep, shape = RoundedCornerShape(28.dp), border = BorderStroke(1.dp, GlassEdge), modifier = Modifier.fillMaxWidth().heightIn(max=680.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text("SETTINGS", color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Black)
                 SettingSwitch("Keep screen awake", keepAwake) { keepAwake = it; vm.settings.keepAwake = it }
                 SettingSwitch("Haptics", haptics) { haptics = it; vm.settings.haptics = it }
                 SectionLabel("GLOBAL WEIGHT INCREMENT")
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) { listOf(0.5f, 1f, 2f, 2.5f, 5f).forEach { v -> FilterChip(selected = increment == v, onClick = { increment = v; vm.settings.incrementKg = v }, label = { Text("${fmt(v.toDouble())}kg") }) } }
+                SectionLabel("BACKUP & RESTORE")
+                Text("A FlipFit backup contains exercises, programs, templates and complete workout history.", color=Muted, fontSize=12.sp)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick={exportLauncher.launch("FlipFit-backup-v${BuildConfig.VERSION_NAME}.flipfit")},modifier=Modifier.weight(1f)){Text("EXPORT",color=Accent)}
+                    OutlinedButton(onClick={importLauncher.launch(arrayOf("*/*"))},modifier=Modifier.weight(1f)){Text("IMPORT",color=Accent)}
+                }
+                OutlinedButton(onClick={vm.resetStarterContent();message="Starter content restored"},modifier=Modifier.fillMaxWidth()){Text("RESTORE STARTER CONTENT",color=Muted)}
+                message?.let { Text(it,color=Accent,fontSize=11.sp) }
                 Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("DONE", color = Color.Black, fontWeight = FontWeight.Black) }
             }
         }
+    }
+    preview?.let { (uri,p) ->
+        AlertDialog(onDismissRequest={preview=null},containerColor=GlassDeep,title={Text("Import FlipFit backup?")},text={Text("${p.exercises} exercises • ${p.templates} templates • ${p.programs} programs • ${p.workouts} workouts\n\nThis will replace the current FlipFit database. Export first if you want to keep it.")},confirmButton={TextButton(onClick={runCatching{vm.importBackup(uri);message="Backup restored";preview=null}.onFailure{message="Import failed: ${it.message}";preview=null}}){Text("REPLACE & IMPORT",color=Danger)}},dismissButton={TextButton(onClick={preview=null}){Text("CANCEL")}})
     }
 }
 
@@ -316,7 +343,7 @@ private fun ExercisePickerDialog(exercises: List<Exercise>, title: String, onDis
 }
 
 @Composable
-private fun ExerciseHelpDialog(exercise: Exercise, onDismiss: () -> Unit) { Dialog(onDismissRequest = onDismiss) { Surface(color = SurfaceHigh, shape = RoundedCornerShape(24.dp), border = BorderStroke(1.dp, OutlineSoft), modifier = Modifier.fillMaxWidth()) { Column(Modifier.padding(18.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) { Text(exercise.name.uppercase(), color = Color.White, fontWeight = FontWeight.Black, textAlign = TextAlign.Center); Text("MOVEMENT DIAGRAM • PLACEHOLDER", color = Accent, fontSize = 10.sp, fontWeight = FontWeight.Bold); Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) { DiagramFrame("START"); Text("→", color = Accent, fontSize = 30.sp, fontWeight = FontWeight.Black); DiagramFrame("FINISH") }; Text(exercise.diagramHint.ifBlank { "Exercise-specific artwork will replace this placeholder. Use controlled form through a comfortable range of motion." }, color = Muted, fontSize = 13.sp, textAlign = TextAlign.Center); Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("BACK TO SET", color = Color.Black, fontWeight = FontWeight.Black) } } } } }
+private fun ExerciseHelpDialog(exercise: Exercise, onDismiss: () -> Unit) { Dialog(onDismissRequest = onDismiss) { Surface(color = SurfaceHigh, shape = RoundedCornerShape(24.dp), border = BorderStroke(1.dp, OutlineSoft), modifier = Modifier.fillMaxWidth()) { Column(Modifier.padding(18.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) { Text(exercise.name.uppercase(), color = Color.White, fontWeight = FontWeight.Black, textAlign = TextAlign.Center); if(exercise.imageUri.isNotBlank()){ AsyncImage(model=exercise.imageUri,contentDescription=exercise.name,modifier=Modifier.fillMaxWidth().height(190.dp).clip(RoundedCornerShape(20.dp))); Text("EXERCISE DIAGRAM",color=Accent,fontSize=10.sp,fontWeight=FontWeight.Bold) } else { Text("MOVEMENT DIAGRAM • PLACEHOLDER", color = Accent, fontSize = 10.sp, fontWeight = FontWeight.Bold); Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) { DiagramFrame("START"); Text("→", color = Accent, fontSize = 30.sp, fontWeight = FontWeight.Black); DiagramFrame("FINISH") } }; Text(exercise.diagramHint.ifBlank { "Use controlled form through a comfortable range of motion." }, color = Muted, fontSize = 13.sp, textAlign = TextAlign.Center); Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("BACK TO SET", color = Color.Black, fontWeight = FontWeight.Black) } } } } }
 
 @Composable
 private fun DiagramFrame(label: String) { Box(Modifier.size(width = 112.dp, height = 105.dp).clip(RoundedCornerShape(17.dp)).background(Bg), contentAlignment = Alignment.Center) { Column(horizontalAlignment = Alignment.CenterHorizontally) { Text("●", color = Accent, fontSize = 24.sp); Text("╱│╲", color = Color.White, fontSize = 19.sp); Text("╱ ╲", color = Color.White, fontSize = 19.sp); Text(label, color = Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold) } } }
@@ -325,22 +352,98 @@ private fun DiagramFrame(label: String) { Box(Modifier.size(width = 112.dp, heig
 private fun PageHeader(title: String, subtitle: String, action: String? = null, onAction: (() -> Unit)? = null) { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Column { Text(title, color = Color.White, fontSize = 27.sp, fontWeight = FontWeight.Black); Text(subtitle, color = Muted, fontSize = 12.sp) }; if (action != null && onAction != null) Button(onClick = onAction, shape = RoundedCornerShape(15.dp), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp)) { Text(action, color = Color.Black, fontWeight = FontWeight.Black) } } }
 
 @Composable
-private fun ExercisesScreen(vm: MainViewModel, exercises: List<Exercise>) {
-    var query by remember { mutableStateOf("") }; var editing by remember { mutableStateOf<Exercise?>(null) }; var creating by remember { mutableStateOf(false) }; val filtered = exercises.filter { query.isBlank() || it.name.contains(query, true) || it.category.contains(query, true) || it.equipment.contains(query, true) }
+private fun ExercisesScreen(vm: MainViewModel, exercises: List<Exercise>, muscleGroups: List<LibraryAsset>, equipment: List<LibraryAsset>) {
+    var query by remember { mutableStateOf("") }; var editing by remember { mutableStateOf<Exercise?>(null) }; var creating by remember { mutableStateOf(false) }; val filtered = exercises.filter { query.isBlank() || it.name.contains(query, true) || it.aliases.contains(query,true) || it.category.contains(query, true) || it.equipment.contains(query, true) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         PageHeader("Exercises", "${exercises.size} movements in your library", "NEW") { creating = true }
         OutlinedTextField(query, { query = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, placeholder = { Text("Search exercises") }, shape = RoundedCornerShape(17.dp))
         filtered.groupBy { it.category }.forEach { (category, items) -> SectionLabel(category.uppercase()); items.forEach { ex -> GlassCard(Modifier.fillMaxWidth().clickable { editing = ex }) { Row(verticalAlignment = Alignment.CenterVertically) { Box(Modifier.size(42.dp).clip(RoundedCornerShape(13.dp)).background(if (ex.favorite) Color(0x222E4810) else Color(0xFF202323)), contentAlignment = Alignment.Center) { Text(if (ex.favorite) "★" else "◇", color = if (ex.favorite) Accent else Muted) }; Spacer(Modifier.width(12.dp)); Column(Modifier.weight(1f)) { Text(ex.name, color = Color.White, fontWeight = FontWeight.Bold); Text("${ex.equipment} • ${if (ex.trackingType == "reps_only") "Reps only" else "Weight + reps"} • ${ex.defaultSets} sets", color = Muted, fontSize = 11.sp) }; Text("EDIT", color = Accent, fontSize = 10.sp, fontWeight = FontWeight.Black) } } } }
         Spacer(Modifier.height(8.dp))
     }
-    if (creating) ExerciseEditorDialog(null, { creating = false }, { vm.saveExercise(it); creating = false })
-    editing?.let { ex -> ExerciseEditorDialog(ex, { editing = null }, { vm.saveExercise(it); editing = null }, { vm.duplicateExercise(ex.id); editing = null }, { vm.deleteExercise(ex.id); editing = null }) }
+    if (creating) ExerciseEditorDialog(null, muscleGroups, equipment, { creating = false }, { vm.saveExercise(it); creating = false }, vm::addMuscleGroup, vm::addEquipment)
+    editing?.let { ex -> ExerciseEditorDialog(ex, muscleGroups, equipment, { editing = null }, { vm.saveExercise(it); editing = null }, vm::addMuscleGroup, vm::addEquipment, { vm.duplicateExercise(ex.id); editing = null }, { vm.deleteExercise(ex.id); editing = null }) }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ExerciseEditorDialog(exercise: Exercise?, muscleGroups: List<LibraryAsset>, equipmentAssets: List<LibraryAsset>, onDismiss: () -> Unit, onSave: (ExerciseDraft) -> Unit, onAddMuscle: (String)->Unit, onAddEquipment:(String)->Unit, onDuplicate: (() -> Unit)? = null, onDelete: (() -> Unit)? = null) {
+    var name by remember(exercise?.id) { mutableStateOf(exercise?.name ?: "") }
+    var category by remember(exercise?.id) { mutableStateOf(exercise?.category ?: muscleGroups.firstOrNull()?.name.orEmpty()) }
+    var equipment by remember(exercise?.id) { mutableStateOf(exercise?.equipment ?: equipmentAssets.firstOrNull()?.name.orEmpty()) }
+    var secondary by remember(exercise?.id){mutableStateOf(exercise?.secondaryMuscles?:"")}
+    var aliases by remember(exercise?.id){mutableStateOf(exercise?.aliases?:"")}
+    var tracking by remember(exercise?.id) { mutableStateOf(exercise?.trackingType ?: "weight_reps") }
+    var favorite by remember(exercise?.id) { mutableStateOf(exercise?.favorite ?: false) }
+    var sets by remember(exercise?.id) { mutableIntStateOf(exercise?.defaultSets ?: 3) }
+    var incrementText by remember(exercise?.id) { mutableStateOf(exercise?.incrementKg?.let(::fmt) ?: "") }
+    var hint by remember(exercise?.id) { mutableStateOf(exercise?.diagramHint ?: "") }
+    var imageUri by remember(exercise?.id){mutableStateOf(exercise?.imageUri?:"")}
+    var muscleOpen by remember{mutableStateOf(false)}; var equipmentOpen by remember{mutableStateOf(false)}
+    var addMuscle by remember{mutableStateOf(false)}; var addEquip by remember{mutableStateOf(false)}; var confirmDelete by remember{mutableStateOf(false)}
+    val context=LocalContext.current
+    val imagePicker=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()){uri->uri?.let{
+        runCatching {
+            val mime=context.contentResolver.getType(it)?:"image/jpeg"
+            val bytes=context.contentResolver.openInputStream(it)!!.use { input -> input.readBytes() }
+            imageUri="data:$mime;base64,"+Base64.encodeToString(bytes,Base64.NO_WRAP)
+        }
+    }}
+    Dialog(onDismissRequest = onDismiss) { Surface(color = GlassDeep, shape = RoundedCornerShape(28.dp), border = BorderStroke(1.dp, GlassEdge), modifier = Modifier.fillMaxWidth().heightIn(max = 680.dp)) { Column(Modifier.verticalScroll(rememberScrollState()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(if (exercise == null) "NEW EXERCISE" else "EDIT EXERCISE", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Black)
+        if(imageUri.isNotBlank()) AsyncImage(model=imageUri,contentDescription="Exercise diagram",modifier=Modifier.fillMaxWidth().height(150.dp).clip(RoundedCornerShape(18.dp)))
+        OutlinedButton(onClick={imagePicker.launch(arrayOf("image/*"))},modifier=Modifier.fillMaxWidth()){Text(if(imageUri.isBlank())"ATTACH IMAGE / DIAGRAM" else "CHANGE IMAGE",color=Accent)}
+        OutlinedTextField(name, { name = it }, label = { Text("Name") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+        ExposedDropdownMenuBox(expanded=muscleOpen,onExpandedChange={muscleOpen=!muscleOpen}) {
+            OutlinedTextField(category,{},readOnly=true,label={Text("Primary muscle group")},trailingIcon={ExposedDropdownMenuDefaults.TrailingIcon(muscleOpen)},modifier=Modifier.menuAnchor().fillMaxWidth())
+            ExposedDropdownMenu(expanded=muscleOpen,onDismissRequest={muscleOpen=false}){muscleGroups.forEach{DropdownMenuItem(text={Text(it.name)},onClick={category=it.name;muscleOpen=false})};DropdownMenuItem(text={Text("+ Add new")},onClick={muscleOpen=false;addMuscle=true})}
+        }
+        OutlinedTextField(secondary,{secondary=it},label={Text("Secondary muscles (comma separated)")},modifier=Modifier.fillMaxWidth(),singleLine=true)
+        ExposedDropdownMenuBox(expanded=equipmentOpen,onExpandedChange={equipmentOpen=!equipmentOpen}) {
+            OutlinedTextField(equipment,{},readOnly=true,label={Text("Equipment")},trailingIcon={ExposedDropdownMenuDefaults.TrailingIcon(equipmentOpen)},modifier=Modifier.menuAnchor().fillMaxWidth())
+            ExposedDropdownMenu(expanded=equipmentOpen,onDismissRequest={equipmentOpen=false}){equipmentAssets.forEach{DropdownMenuItem(text={Text(it.name)},onClick={equipment=it.name;equipmentOpen=false})};DropdownMenuItem(text={Text("+ Add new")},onClick={equipmentOpen=false;addEquip=true})}
+        }
+        OutlinedTextField(aliases,{aliases=it},label={Text("Search aliases")},modifier=Modifier.fillMaxWidth(),singleLine=true)
+        SectionLabel("TRACKING"); Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { FilterChip(selected = tracking == "weight_reps", onClick = { tracking = "weight_reps" }, label = { Text("Weight + reps") }); FilterChip(selected = tracking == "reps_only", onClick = { tracking = "reps_only" }, label = { Text("Reps only") }) }
+        if (tracking == "weight_reps") OutlinedTextField(incrementText, { incrementText = it }, label = { Text("Own increment kg (blank = global)") }, modifier = Modifier.fillMaxWidth(), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Text("Default sets", color = Color.White); Row(verticalAlignment = Alignment.CenterVertically) { TextButton(onClick = { sets = (sets - 1).coerceAtLeast(1) }) { Text("−") }; Text("$sets", color = Color.White, fontWeight = FontWeight.Black); TextButton(onClick = { sets += 1 }) { Text("+") } } }
+        SettingSwitch("Favourite", favorite) { favorite = it }; OutlinedTextField(hint, { hint = it }, label = { Text("Form cues / instructions") }, modifier = Modifier.fillMaxWidth(), minLines = 2)
+        Button(enabled = name.isNotBlank(), onClick = { onSave(ExerciseDraft(exercise?.id, name.trim(), category.ifBlank{"Other"}, equipment.ifBlank{"Other"}, tracking, incrementText.toDoubleOrNull(), favorite, hint.trim(), sets, exercise?.notes?:"", secondary.trim(), aliases.trim(), imageUri)) }, modifier = Modifier.fillMaxWidth()) { Text("SAVE", color = Color.Black, fontWeight = FontWeight.Black) }
+        if (exercise != null) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedButton(onClick = { onDuplicate?.invoke() }, modifier = Modifier.weight(1f)) { Text("DUPLICATE", color = Accent) }; OutlinedButton(onClick = { confirmDelete=true }, modifier = Modifier.weight(1f)) { Text("DELETE", color = Danger) } }
+        TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("CANCEL", color = Muted) }
+    } } }
+    if(addMuscle) TextEntryDialog("New muscle group","",{addMuscle=false}){onAddMuscle(it);category=it.trim();addMuscle=false}
+    if(addEquip) TextEntryDialog("New equipment","",{addEquip=false}){onAddEquipment(it);equipment=it.trim();addEquip=false}
+    if(confirmDelete) AlertDialog(onDismissRequest={confirmDelete=false},containerColor=GlassDeep,title={Text("Delete exercise?")},text={Text("This removes it from your exercise library and templates. Existing workout history is preserved.")},confirmButton={TextButton(onClick={confirmDelete=false;onDelete?.invoke()}){Text("DELETE",color=Danger)}},dismissButton={TextButton(onClick={confirmDelete=false}){Text("CANCEL")}})
 }
 
 @Composable
-private fun ExerciseEditorDialog(exercise: Exercise?, onDismiss: () -> Unit, onSave: (ExerciseDraft) -> Unit, onDuplicate: (() -> Unit)? = null, onDelete: (() -> Unit)? = null) {
-    var name by remember(exercise?.id) { mutableStateOf(exercise?.name ?: "") }; var category by remember(exercise?.id) { mutableStateOf(exercise?.category ?: "Chest") }; var equipment by remember(exercise?.id) { mutableStateOf(exercise?.equipment ?: "Dumbbell") }; var tracking by remember(exercise?.id) { mutableStateOf(exercise?.trackingType ?: "weight_reps") }; var favorite by remember(exercise?.id) { mutableStateOf(exercise?.favorite ?: false) }; var sets by remember(exercise?.id) { mutableIntStateOf(exercise?.defaultSets ?: 3) }; var incrementText by remember(exercise?.id) { mutableStateOf(exercise?.incrementKg?.let(::fmt) ?: "") }; var hint by remember(exercise?.id) { mutableStateOf(exercise?.diagramHint ?: "") }
-    Dialog(onDismissRequest = onDismiss) { Surface(color = SurfaceHigh, shape = RoundedCornerShape(24.dp), border = BorderStroke(1.dp, OutlineSoft), modifier = Modifier.fillMaxWidth().heightIn(max = 620.dp)) { Column(Modifier.verticalScroll(rememberScrollState()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) { Text(if (exercise == null) "NEW EXERCISE" else "EDIT EXERCISE", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Black); OutlinedTextField(name, { name = it }, label = { Text("Name") }, modifier = Modifier.fillMaxWidth(), singleLine = true); OutlinedTextField(category, { category = it }, label = { Text("Muscle group") }, modifier = Modifier.fillMaxWidth(), singleLine = true); OutlinedTextField(equipment, { equipment = it }, label = { Text("Equipment") }, modifier = Modifier.fillMaxWidth(), singleLine = true); SectionLabel("TRACKING"); Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { FilterChip(selected = tracking == "weight_reps", onClick = { tracking = "weight_reps" }, label = { Text("Weight + reps") }); FilterChip(selected = tracking == "reps_only", onClick = { tracking = "reps_only" }, label = { Text("Reps only") }) }; if (tracking == "weight_reps") OutlinedTextField(incrementText, { incrementText = it }, label = { Text("Own increment kg (blank = global)") }, modifier = Modifier.fillMaxWidth(), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)); Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Text("Default sets", color = Color.White); Row(verticalAlignment = Alignment.CenterVertically) { TextButton(onClick = { sets = (sets - 1).coerceAtLeast(1) }) { Text("−") }; Text("$sets", color = Color.White, fontWeight = FontWeight.Black); TextButton(onClick = { sets += 1 }) { Text("+") } } }; SettingSwitch("Favourite", favorite) { favorite = it }; OutlinedTextField(hint, { hint = it }, label = { Text("Diagram / form hint") }, modifier = Modifier.fillMaxWidth(), minLines = 2); Button(enabled = name.isNotBlank(), onClick = { onSave(ExerciseDraft(exercise?.id, name.trim(), category.trim().ifBlank { "Other" }, equipment.trim().ifBlank { "Other" }, tracking, incrementText.toDoubleOrNull(), favorite, hint.trim(), sets)) }, modifier = Modifier.fillMaxWidth()) { Text("SAVE", color = Color.Black, fontWeight = FontWeight.Black) }; if (exercise != null) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedButton(onClick = { onDuplicate?.invoke() }, modifier = Modifier.weight(1f)) { Text("DUPLICATE", color = Accent) }; OutlinedButton(onClick = { onDelete?.invoke() }, modifier = Modifier.weight(1f)) { Text("DELETE", color = Danger) } }; TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("CANCEL", color = Muted) } } } }
+private fun ProgramsScreen(vm: MainViewModel, programs: List<WorkoutProgram>, templates: List<WorkoutTemplate>, exercises: List<Exercise>) {
+    var selected by remember{mutableStateOf<WorkoutProgram?>(null)}; var creating by remember{mutableStateOf(false)}; var showTemplates by remember{mutableStateOf(false)}
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),verticalArrangement=Arrangement.spacedBy(12.dp)){
+        PageHeader("Programs","Programs contain reusable workout templates","NEW"){creating=true}
+        programs.forEach{p-> GlassCard(Modifier.fillMaxWidth().clickable{selected=p},lime=p.name.equals("Bulk",true)){
+            Row(verticalAlignment=Alignment.CenterVertically){Column(Modifier.weight(1f)){Text(p.name,color=Color.White,fontSize=20.sp,fontWeight=FontWeight.Black);Text("${p.templates.size} sessions",color=Muted,fontSize=11.sp);vm.nextTemplate(p)?.let{Text("UP NEXT • ${it.name}",color=Accent,fontSize=11.sp,fontWeight=FontWeight.Bold)}};Text("OPEN",color=Accent,fontSize=10.sp,fontWeight=FontWeight.Black)}
+        }}
+        OutlinedButton(onClick={showTemplates=true},modifier=Modifier.fillMaxWidth()){Text("MANAGE TEMPLATE LIBRARY",color=Muted)}
+    }
+    if(creating) TextEntryDialog("New program","",{creating=false}){if(it.isNotBlank())vm.createProgram(it);creating=false}
+    selected?.let{p->ProgramEditorDialog(p,templates,{selected=null},{vm.renameProgram(p.id,it)},{vm.duplicateProgram(p.id);selected=null},{vm.archiveProgram(p.id);selected=null},{vm.addTemplateToProgram(p.id,it)},{vm.removeTemplateFromProgram(p.id,it)},{t->vm.start(t)})}
+    if(showTemplates) Dialog(onDismissRequest={showTemplates=false}){Surface(color=Bg,modifier=Modifier.fillMaxSize()){TemplatesScreen(vm,templates,exercises)}}
+}
+
+@Composable
+private fun ProgramEditorDialog(program:WorkoutProgram, allTemplates:List<WorkoutTemplate>, onDismiss:()->Unit,onRename:(String)->Unit,onDuplicate:()->Unit,onArchive:()->Unit,onAdd:(Long)->Unit,onRemove:(Long)->Unit,onStart:(WorkoutTemplate)->Unit){
+    var name by remember(program.id,program.name){mutableStateOf(program.name)};var add by remember{mutableStateOf(false)};var confirmArchive by remember{mutableStateOf(false)};var removeId by remember{mutableStateOf<Long?>(null)}
+    Dialog(onDismissRequest=onDismiss){Surface(color=GlassDeep,shape=RoundedCornerShape(28.dp),border=BorderStroke(1.dp,GlassEdge),modifier=Modifier.fillMaxWidth().heightIn(max=680.dp)){Column(Modifier.verticalScroll(rememberScrollState()).padding(18.dp),verticalArrangement=Arrangement.spacedBy(10.dp)){
+        SectionLabel("PROGRAM");Row(verticalAlignment=Alignment.CenterVertically){OutlinedTextField(name,{name=it},modifier=Modifier.weight(1f),singleLine=true);TextButton(onClick={onRename(name)}){Text("SAVE")}}
+        program.templates.sortedBy{it.orderIndex}.forEachIndexed{i,pt->GlassCard(Modifier.fillMaxWidth()){Text("SESSION ${i+1}",color=Muted,fontSize=9.sp,fontWeight=FontWeight.Black);Text(pt.template.name,color=Color.White,fontWeight=FontWeight.Black);Text(pt.template.exercises.joinToString(" • "){it.exercise.name},color=Muted,fontSize=10.sp,maxLines=2);Row{TextButton(onClick={onStart(pt.template);onDismiss()}){Text("START",color=Accent)};TextButton(onClick={removeId=pt.template.id}){Text("REMOVE",color=Danger)}}}}
+        Button(onClick={add=true},modifier=Modifier.fillMaxWidth()){Text("ADD TEMPLATE",color=Color.Black,fontWeight=FontWeight.Black)}
+        Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){OutlinedButton(onClick=onDuplicate,modifier=Modifier.weight(1f)){Text("DUPLICATE",color=Accent)};OutlinedButton(onClick={confirmArchive=true},modifier=Modifier.weight(1f)){Text("ARCHIVE",color=Danger)}}
+        TextButton(onClick=onDismiss,modifier=Modifier.fillMaxWidth()){Text("CLOSE",color=Muted)}
+    }}}
+    if(add) AlertDialog(onDismissRequest={add=false},containerColor=GlassDeep,title={Text("Add template")},text={Column(Modifier.heightIn(max=360.dp).verticalScroll(rememberScrollState())){allTemplates.filter{t->program.templates.none{it.template.id==t.id}}.forEach{t->TextButton(onClick={onAdd(t.id);add=false},modifier=Modifier.fillMaxWidth()){Text(t.name,color=Color.White,modifier=Modifier.fillMaxWidth())}}}},confirmButton={},dismissButton={TextButton(onClick={add=false}){Text("CANCEL")}})
+    removeId?.let{id->AlertDialog(onDismissRequest={removeId=null},containerColor=GlassDeep,title={Text("Remove template from program?")},text={Text("The template itself and workout history will not be deleted.")},confirmButton={TextButton(onClick={onRemove(id);removeId=null}){Text("REMOVE",color=Danger)}},dismissButton={TextButton(onClick={removeId=null}){Text("CANCEL")}})}
+    if(confirmArchive)AlertDialog(onDismissRequest={confirmArchive=false},containerColor=GlassDeep,title={Text("Archive program?")},text={Text("It will disappear from normal use. Its templates and workout history are preserved.")},confirmButton={TextButton(onClick={confirmArchive=false;onArchive()}){Text("ARCHIVE",color=Danger)}},dismissButton={TextButton(onClick={confirmArchive=false}){Text("CANCEL")}})
 }
 
 @Composable
@@ -353,14 +456,32 @@ private fun TemplatesScreen(vm: MainViewModel, templates: List<WorkoutTemplate>,
     }
     if (creating) TextEntryDialog("New template", "", { creating = false }) { name -> if (name.isNotBlank()) vm.createTemplate(name.trim()); creating = false }
     val selected = selectedId?.let { id -> templates.firstOrNull { it.id == id } }
-    selected?.let { template -> TemplateEditorDialog(template, { selectedId = null }, { vm.renameTemplate(template.id, it) }, { vm.duplicateTemplate(template.id); selectedId = null }, { vm.deleteTemplate(template.id); selectedId = null }, { exerciseId, direction -> vm.moveTemplateExercise(template.id, exerciseId, direction) }, { exerciseId, delta -> vm.adjustTemplateSets(template.id, exerciseId, delta) }, { exerciseId -> vm.removeTemplateExercise(template.id, exerciseId) }, { addToTemplateId = template.id }) }
+    selected?.let { template -> TemplateEditorDialog(template, { selectedId = null }, { vm.renameTemplate(template.id, it) }, { vm.duplicateTemplate(template.id); selectedId = null }, { vm.deleteTemplate(template.id); selectedId = null }, { exerciseId, direction -> vm.moveTemplateExercise(template.id, exerciseId, direction) }, { exerciseId, delta -> vm.adjustTemplateSets(template.id, exerciseId, delta) }, { exerciseId -> vm.removeTemplateExercise(template.id, exerciseId) }, { exerciseId,sets,min,max,side -> vm.setTemplateTarget(template.id,exerciseId,sets,min,max,side) }, { addToTemplateId = template.id }) }
     addToTemplateId?.let { tid -> val template = templates.firstOrNull { it.id == tid }; ExercisePickerDialog(exercises, "Add to ${template?.name ?: "template"}", { addToTemplateId = null }) { exercise -> vm.addTemplateExercise(tid, exercise.id); addToTemplateId = null } }
 }
 
 @Composable
-private fun TemplateEditorDialog(template: WorkoutTemplate, onDismiss: () -> Unit, onRename: (String) -> Unit, onDuplicate: () -> Unit, onDelete: () -> Unit, onMove: (Long, Int) -> Unit, onSets: (Long, Int) -> Unit, onRemove: (Long) -> Unit, onAdd: () -> Unit) {
-    var rename by remember(template.id, template.name) { mutableStateOf(template.name) }
-    Dialog(onDismissRequest = onDismiss) { Surface(color = SurfaceHigh, shape = RoundedCornerShape(24.dp), border = BorderStroke(1.dp, OutlineSoft), modifier = Modifier.fillMaxWidth().heightIn(max = 650.dp)) { Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) { SectionLabel("EDIT TEMPLATE"); Row(verticalAlignment = Alignment.CenterVertically) { OutlinedTextField(rename, { rename = it }, modifier = Modifier.weight(1f), singleLine = true); TextButton(onClick = { if (rename.isNotBlank()) onRename(rename.trim()) }) { Text("SAVE") } }; template.exercises.sortedBy { it.orderIndex }.forEach { te -> Surface(color = Bg, shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, OutlineSoft), modifier = Modifier.fillMaxWidth()) { Column(Modifier.padding(10.dp)) { Text(te.exercise.name, color = Color.White, fontWeight = FontWeight.Bold); Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) { Row { TextButton(onClick = { onMove(te.exercise.id, -1) }) { Text("↑") }; TextButton(onClick = { onMove(te.exercise.id, 1) }) { Text("↓") } }; Row(verticalAlignment = Alignment.CenterVertically) { TextButton(onClick = { onSets(te.exercise.id, -1) }) { Text("−") }; Text("${te.defaultSets} sets", color = Color.White); TextButton(onClick = { onSets(te.exercise.id, 1) }) { Text("+") } }; TextButton(onClick = { onRemove(te.exercise.id) }) { Text("REMOVE", color = Muted, fontSize = 10.sp) } } } } }; Button(onClick = onAdd, modifier = Modifier.fillMaxWidth()) { Text("ADD EXERCISE", color = Color.Black, fontWeight = FontWeight.Black) }; Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedButton(onClick = onDuplicate, modifier = Modifier.weight(1f)) { Text("DUPLICATE", color = Accent) }; OutlinedButton(onClick = onDelete, modifier = Modifier.weight(1f)) { Text("DELETE", color = Danger) } }; TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("CLOSE", color = Muted) } } } }
+private fun TemplateEditorDialog(template: WorkoutTemplate, onDismiss: () -> Unit, onRename: (String) -> Unit, onDuplicate: () -> Unit, onDelete: () -> Unit, onMove: (Long, Int) -> Unit, onSets: (Long, Int) -> Unit, onRemove: (Long) -> Unit, onTarget:(Long,Int,Int?,Int?,Boolean)->Unit, onAdd: () -> Unit) {
+    var rename by remember(template.id,template.name){mutableStateOf(template.name)};var editing by remember{mutableStateOf<TemplateExercise?>(null)};var remove by remember{mutableStateOf<TemplateExercise?>(null)};var confirmDelete by remember{mutableStateOf(false)}
+    Dialog(onDismissRequest=onDismiss){Surface(color=GlassDeep,shape=RoundedCornerShape(28.dp),border=BorderStroke(1.dp,GlassEdge),modifier=Modifier.fillMaxWidth().heightIn(max=680.dp)){Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp),verticalArrangement=Arrangement.spacedBy(10.dp)){
+        SectionLabel("EDIT TEMPLATE");Row(verticalAlignment=Alignment.CenterVertically){OutlinedTextField(rename,{rename=it},modifier=Modifier.weight(1f),singleLine=true);TextButton(onClick={if(rename.isNotBlank())onRename(rename.trim())}){Text("SAVE")}}
+        template.exercises.sortedBy{it.orderIndex}.forEach{te->GlassCard(Modifier.fillMaxWidth()){
+            Row(verticalAlignment=Alignment.CenterVertically){Column(Modifier.weight(1f)){Text(te.exercise.name,color=Color.White,fontWeight=FontWeight.Bold);Text(if(te.targetMinReps!=null)te.targetLabel else "${te.defaultSets} sets",color=Accent,fontSize=11.sp)};TextButton(onClick={editing=te}){Text("EDIT",color=Accent)}}
+            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){Row{TextButton(onClick={onMove(te.exercise.id,-1)}){Text("↑")};TextButton(onClick={onMove(te.exercise.id,1)}){Text("↓")}};TextButton(onClick={remove=te}){Text("REMOVE",color=Danger,fontSize=10.sp)}}
+        }}
+        Button(onClick=onAdd,modifier=Modifier.fillMaxWidth()){Text("ADD EXERCISE",color=Color.Black,fontWeight=FontWeight.Black)}
+        Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){OutlinedButton(onClick=onDuplicate,modifier=Modifier.weight(1f)){Text("DUPLICATE",color=Accent)};OutlinedButton(onClick={confirmDelete=true},modifier=Modifier.weight(1f)){Text("DELETE",color=Danger)}}
+        TextButton(onClick=onDismiss,modifier=Modifier.fillMaxWidth()){Text("CLOSE",color=Muted)}
+    }}}
+    editing?.let{te->TemplateExerciseEditDialog(te,{editing=null}){sets,min,max,side->onTarget(te.exercise.id,sets,min,max,side);editing=null}}
+    remove?.let{te->AlertDialog(onDismissRequest={remove=null},containerColor=GlassDeep,title={Text("Remove exercise?")},text={Text("Remove ${te.exercise.name} from this template? The exercise itself and its history are preserved.")},confirmButton={TextButton(onClick={onRemove(te.exercise.id);remove=null}){Text("REMOVE",color=Danger)}},dismissButton={TextButton(onClick={remove=null}){Text("CANCEL")}})}
+    if(confirmDelete)AlertDialog(onDismissRequest={confirmDelete=false},containerColor=GlassDeep,title={Text("Delete template?")},text={Text("This removes the template from programs. Existing workout history is preserved.")},confirmButton={TextButton(onClick={confirmDelete=false;onDelete()}){Text("DELETE",color=Danger)}},dismissButton={TextButton(onClick={confirmDelete=false}){Text("CANCEL")}})
+}
+
+@Composable
+private fun TemplateExerciseEditDialog(te:TemplateExercise,onDismiss:()->Unit,onSave:(Int,Int?,Int?,Boolean)->Unit){
+    var sets by remember{mutableIntStateOf(te.defaultSets)};var min by remember{mutableStateOf(te.targetMinReps?.toString()?:"")};var max by remember{mutableStateOf(te.targetMaxReps?.toString()?:"")};var side by remember{mutableStateOf(te.perSide)}
+    AlertDialog(onDismissRequest=onDismiss,containerColor=GlassDeep,title={Text(te.exercise.name)},text={Column(verticalArrangement=Arrangement.spacedBy(10.dp)){OutlinedTextField(sets.toString(),{sets=it.toIntOrNull()?.coerceAtLeast(1)?:sets},label={Text("Sets")},singleLine=true);OutlinedTextField(min,{min=it},label={Text("Minimum / target reps")},singleLine=true,keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Number));OutlinedTextField(max,{max=it},label={Text("Maximum reps (optional)")},singleLine=true,keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Number));SettingSwitch("Each arm / leg",side){side=it}}},confirmButton={TextButton(onClick={onSave(sets,min.toIntOrNull(),max.toIntOrNull()?:min.toIntOrNull(),side)}){Text("SAVE",color=Accent)}},dismissButton={TextButton(onClick=onDismiss){Text("CANCEL")}})
 }
 
 @Composable

@@ -5,18 +5,27 @@ import android.content.Context
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import android.net.Uri
+import java.io.File
 import com.simontester.flipfit.model.*
 import kotlin.math.max
 
-class FlipFitDatabase(context: Context) : SQLiteOpenHelper(context, "flipfit.db", null, 3) {
+class FlipFitDatabase(private val context: Context) : SQLiteOpenHelper(context, "flipfit.db", null, 4) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE exercise(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,category TEXT NOT NULL,equipment TEXT NOT NULL,notes TEXT NOT NULL DEFAULT '',tracking_type TEXT NOT NULL DEFAULT 'weight_reps',increment_kg REAL,favorite INTEGER NOT NULL DEFAULT 0,diagram_hint TEXT NOT NULL DEFAULT '',default_sets INTEGER NOT NULL DEFAULT 3,archived INTEGER NOT NULL DEFAULT 0)")
-        db.execSQL("CREATE TABLE workout_template(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL)")
-        db.execSQL("CREATE TABLE template_exercise(id INTEGER PRIMARY KEY AUTOINCREMENT,template_id INTEGER NOT NULL,exercise_id INTEGER NOT NULL,order_index INTEGER NOT NULL,default_sets INTEGER NOT NULL)")
+        db.execSQL("CREATE TABLE workout_template(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,archived INTEGER NOT NULL DEFAULT 0)")
+        db.execSQL("CREATE TABLE program(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,archived INTEGER NOT NULL DEFAULT 0)")
+        db.execSQL("CREATE TABLE program_template(id INTEGER PRIMARY KEY AUTOINCREMENT,program_id INTEGER NOT NULL,template_id INTEGER NOT NULL,order_index INTEGER NOT NULL)")
+        db.execSQL("CREATE TABLE muscle_group(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL UNIQUE COLLATE NOCASE)")
+        db.execSQL("CREATE TABLE equipment(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL UNIQUE COLLATE NOCASE)")
+        db.execSQL("CREATE TABLE template_exercise(id INTEGER PRIMARY KEY AUTOINCREMENT,template_id INTEGER NOT NULL,exercise_id INTEGER NOT NULL,order_index INTEGER NOT NULL,default_sets INTEGER NOT NULL,target_min_reps INTEGER,target_max_reps INTEGER,per_side INTEGER NOT NULL DEFAULT 0)")
         db.execSQL("CREATE TABLE workout_session(id INTEGER PRIMARY KEY AUTOINCREMENT,template_id INTEGER,name TEXT NOT NULL,started_at INTEGER NOT NULL,ended_at INTEGER,current_order_index INTEGER NOT NULL DEFAULT 0)")
         db.execSQL("CREATE TABLE workout_exercise(id INTEGER PRIMARY KEY AUTOINCREMENT,session_id INTEGER NOT NULL,exercise_id INTEGER NOT NULL,order_index INTEGER NOT NULL,target_sets INTEGER NOT NULL)")
         db.execSQL("CREATE TABLE workout_set(id INTEGER PRIMARY KEY AUTOINCREMENT,workout_exercise_id INTEGER NOT NULL,set_number INTEGER NOT NULL,weight_kg REAL NOT NULL,reps INTEGER NOT NULL,logged_at INTEGER NOT NULL,skipped INTEGER NOT NULL DEFAULT 0,is_pr INTEGER NOT NULL DEFAULT 0)")
         db.execSQL("CREATE UNIQUE INDEX idx_workout_set_unique ON workout_set(workout_exercise_id,set_number)")
+        db.execSQL("ALTER TABLE exercise ADD COLUMN secondary_muscles TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE exercise ADD COLUMN aliases TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE exercise ADD COLUMN image_uri TEXT NOT NULL DEFAULT ''")
         ensureCatalog(db)
     }
 
@@ -35,6 +44,19 @@ class FlipFitDatabase(context: Context) : SQLiteOpenHelper(context, "flipfit.db"
         if (oldVersion < 3) {
             db.execSQL("ALTER TABLE exercise ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
         }
+        if (oldVersion < 4) {
+            db.execSQL("ALTER TABLE exercise ADD COLUMN secondary_muscles TEXT NOT NULL DEFAULT ''")
+            db.execSQL("ALTER TABLE exercise ADD COLUMN aliases TEXT NOT NULL DEFAULT ''")
+            db.execSQL("ALTER TABLE exercise ADD COLUMN image_uri TEXT NOT NULL DEFAULT ''")
+            db.execSQL("ALTER TABLE workout_template ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE template_exercise ADD COLUMN target_min_reps INTEGER")
+            db.execSQL("ALTER TABLE template_exercise ADD COLUMN target_max_reps INTEGER")
+            db.execSQL("ALTER TABLE template_exercise ADD COLUMN per_side INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("CREATE TABLE IF NOT EXISTS program(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,archived INTEGER NOT NULL DEFAULT 0)")
+            db.execSQL("CREATE TABLE IF NOT EXISTS program_template(id INTEGER PRIMARY KEY AUTOINCREMENT,program_id INTEGER NOT NULL,template_id INTEGER NOT NULL,order_index INTEGER NOT NULL)")
+            db.execSQL("CREATE TABLE IF NOT EXISTS muscle_group(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL UNIQUE COLLATE NOCASE)")
+            db.execSQL("CREATE TABLE IF NOT EXISTS equipment(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL UNIQUE COLLATE NOCASE)")
+        }
         ensureCatalog(db)
     }
 
@@ -47,6 +69,12 @@ class FlipFitDatabase(context: Context) : SQLiteOpenHelper(context, "flipfit.db"
     )
 
     private fun ensureCatalog(db: SQLiteDatabase) {
+        listOf("Chest","Back","Shoulders","Biceps","Triceps","Quads","Hamstrings","Glutes","Calves","Core","Legs","Other").forEach { name ->
+            db.insertWithOnConflict("muscle_group", null, ContentValues().apply { put("name", name) }, SQLiteDatabase.CONFLICT_IGNORE)
+        }
+        listOf("Dumbbell","Barbell","Kettlebell","Cable","Machine","Smith Machine","Bodyweight","Bench","Bands","Leg Press","Other").forEach { name ->
+            db.insertWithOnConflict("equipment", null, ContentValues().apply { put("name", name) }, SQLiteDatabase.CONFLICT_IGNORE)
+        }
         val seeds = listOf(
             ExerciseSeed("Dumbbell Bench Press","Chest","Dumbbell",diagram="Start: dumbbells above chest, elbows softly bent. Finish: lower under control until elbows are just below the bench, then press back up."),
             ExerciseSeed("Incline Dumbbell Press","Chest","Dumbbell",diagram="Start: incline bench, dumbbells above upper chest. Finish: lower beside upper chest, then press up and slightly inward."),
@@ -106,6 +134,52 @@ class FlipFitDatabase(context: Context) : SQLiteOpenHelper(context, "flipfit.db"
         ensureStarterTemplate(db, "LEGS", listOf("Goblet Squat","Romanian Deadlift","Leg Press","Leg Curl","Calf Raise"))
         ensureStarterTemplate(db, "UPPER BODY", listOf("Dumbbell Bench Press","Lat Pulldown","Dumbbell Shoulder Press","Seated Cable Row","Dumbbell Curl","Tricep Pushdown"))
         ensureStarterTemplate(db, "FULL BODY", listOf("Goblet Squat","Dumbbell Bench Press","One-Arm Dumbbell Row","Dumbbell Shoulder Press","Romanian Deadlift"))
+        ensureBulkProgram(db)
+    }
+
+    private fun ensureBulkProgram(db: SQLiteDatabase) {
+        data class Item(val name:String,val sets:Int,val min:Int,val max:Int= min,val side:Boolean=false,val muscle:String,val equipment:String)
+        val sessions = listOf(
+            "Session 1 — Quads and Glutes" to listOf(
+                Item("Leg Extensions",3,15,muscle="Quads",equipment="Machine"), Item("Bulgarian Split Squats",3,15,side=true,muscle="Quads",equipment="Dumbbell"),
+                Item("Hack Squats",3,15,muscle="Quads",equipment="Machine"), Item("Dumbbell Step Ups",3,15,side=true,muscle="Glutes",equipment="Dumbbell"),
+                Item("Hip Thrusts",4,20,muscle="Glutes",equipment="Barbell"), Item("Cable Kick Backs",4,20,side=true,muscle="Glutes",equipment="Cable")),
+            "Session 2 — Chest and Back" to listOf(
+                Item("Machine Chest Press",3,12,muscle="Chest",equipment="Machine"), Item("Pec Deck",3,12,muscle="Chest",equipment="Machine"),
+                Item("DB Rows",3,12,side=true,muscle="Back",equipment="Dumbbell"), Item("Lat Pulldowns",3,12,muscle="Back",equipment="Cable"),
+                Item("Cable Seated Rows – Underhand Grip",3,12,muscle="Back",equipment="Cable"), Item("Seated Row Machine – Wide Grip",3,12,muscle="Back",equipment="Machine")),
+            "Session 3 — Hamstrings and Glutes" to listOf(
+                Item("Seated Leg Curls",3,12,muscle="Hamstrings",equipment="Machine"), Item("Laying Hamstring Curls",3,12,muscle="Hamstrings",equipment="Machine"),
+                Item("Dumbbell Stiff Leg Deadlifts",3,12,muscle="Hamstrings",equipment="Dumbbell"), Item("Sumo Deadlifts",3,12,muscle="Glutes",equipment="Barbell"),
+                Item("Glute Drive – Banded Abduction",3,12,muscle="Glutes",equipment="Bands"), Item("Cable Pull Throughs",3,12,muscle="Glutes",equipment="Cable")),
+            "Session 4 — Shoulders and Arms" to listOf(
+                Item("DB Shoulder Press",3,12,muscle="Shoulders",equipment="Dumbbell"), Item("DB Lateral Raises",3,12,muscle="Shoulders",equipment="Dumbbell"),
+                Item("DB Front Raises",3,12,muscle="Shoulders",equipment="Dumbbell"), Item("Rear Delt Fly",3,12,muscle="Shoulders",equipment="Dumbbell"),
+                Item("Hammer Curls",3,12,muscle="Biceps",equipment="Dumbbell"), Item("Skullcrushers",3,12,muscle="Triceps",equipment="Barbell")),
+            "Session 5 — Glutes and Calves – Heavy Day" to listOf(
+                Item("Smith Machine Sumo Squats",3,6,8,muscle="Glutes",equipment="Smith Machine"), Item("Good Mornings",3,6,8,muscle="Hamstrings",equipment="Barbell"),
+                Item("Wide Stance Leg Press",3,6,8,muscle="Glutes",equipment="Leg Press"), Item("Kickback Machine",3,6,8,true,muscle="Glutes",equipment="Machine"),
+                Item("Glute Bridges",3,15,20,true,muscle="Glutes",equipment="Bodyweight"), Item("Glute Machine",3,6,8,muscle="Glutes",equipment="Machine"),
+                Item("Calf Raises",4,25,muscle="Calves",equipment="Machine"), Item("Calf Presses on Leg Press",4,25,muscle="Calves",equipment="Leg Press"))
+        )
+        val templateIds = mutableListOf<Long>()
+        sessions.forEach { (templateName, items) ->
+            var tid = db.rawQuery("SELECT id FROM workout_template WHERE name=? LIMIT 1", arrayOf(templateName)).use { q -> if(q.moveToFirst()) q.getLong(0) else -1L }
+            if (tid < 0) tid = db.insert("workout_template", null, ContentValues().apply { put("name",templateName) })
+            if (db.rawQuery("SELECT 1 FROM template_exercise WHERE template_id=? LIMIT 1", arrayOf(tid.toString())).use { it.moveToFirst() }.not()) {
+                items.forEachIndexed { index, item ->
+                    var eid = db.rawQuery("SELECT id FROM exercise WHERE lower(name)=lower(?) LIMIT 1", arrayOf(item.name)).use { q -> if(q.moveToFirst()) q.getLong(0) else -1L }
+                    if(eid < 0) eid = db.insert("exercise",null,ContentValues().apply { put("name",item.name);put("category",item.muscle);put("equipment",item.equipment);put("default_sets",item.sets);put("archived",0) })
+                    db.insert("template_exercise",null,ContentValues().apply { put("template_id",tid);put("exercise_id",eid);put("order_index",index);put("default_sets",item.sets);put("target_min_reps",item.min);put("target_max_reps",item.max);put("per_side",if(item.side)1 else 0) })
+                }
+            }
+            templateIds += tid
+        }
+        var pid = db.rawQuery("SELECT id FROM program WHERE lower(name)='bulk' LIMIT 1",null).use { q -> if(q.moveToFirst()) q.getLong(0) else -1L }
+        if(pid < 0) pid = db.insert("program",null,ContentValues().apply { put("name","Bulk") })
+        if(db.rawQuery("SELECT 1 FROM program_template WHERE program_id=? LIMIT 1",arrayOf(pid.toString())).use { it.moveToFirst() }.not()) {
+            templateIds.forEachIndexed { i, tid -> db.insert("program_template",null,ContentValues().apply { put("program_id",pid);put("template_id",tid);put("order_index",i) }) }
+        }
     }
 
     private fun ensureStarterTemplate(db: SQLiteDatabase, name: String, exerciseNames: List<String>) {
@@ -129,14 +203,15 @@ class FlipFitDatabase(context: Context) : SQLiteOpenHelper(context, "flipfit.db"
         id = c.getLong(offset), name = c.getString(offset + 1), category = c.getString(offset + 2),
         equipment = c.getString(offset + 3), notes = c.getString(offset + 4), trackingType = c.getString(offset + 5),
         incrementKg = if (c.isNull(offset + 6)) null else c.getDouble(offset + 6),
-        favorite = c.getInt(offset + 7) != 0, diagramHint = c.getString(offset + 8), defaultSets = c.getInt(offset + 9)
+        favorite = c.getInt(offset + 7) != 0, diagramHint = c.getString(offset + 8), defaultSets = c.getInt(offset + 9),
+        secondaryMuscles = c.getString(offset + 10), aliases = c.getString(offset + 11), imageUri = c.getString(offset + 12)
     )
 
     fun getAllExercises(): List<Exercise> {
         val db = writableDatabase
         ensureCatalog(db)
         val out = mutableListOf<Exercise>()
-        db.rawQuery("SELECT id,name,category,equipment,notes,tracking_type,increment_kg,favorite,diagram_hint,default_sets FROM exercise WHERE archived=0 ORDER BY favorite DESC, category, name", null).use { c ->
+        db.rawQuery("SELECT id,name,category,equipment,notes,tracking_type,increment_kg,favorite,diagram_hint,default_sets,secondary_muscles,aliases,image_uri FROM exercise WHERE archived=0 ORDER BY favorite DESC, category, name", null).use { c ->
             while (c.moveToNext()) out += exerciseFromCursor(c)
         }
         return out
@@ -146,14 +221,14 @@ class FlipFitDatabase(context: Context) : SQLiteOpenHelper(context, "flipfit.db"
         val db = writableDatabase
         ensureCatalog(db)
         val result = mutableListOf<WorkoutTemplate>()
-        db.rawQuery("SELECT id,name FROM workout_template ORDER BY id", null).use { c ->
+        db.rawQuery("SELECT id,name FROM workout_template WHERE archived=0 ORDER BY id", null).use { c ->
             while (c.moveToNext()) {
                 val id = c.getLong(0); val name = c.getString(1)
                 val items = mutableListOf<TemplateExercise>()
-                db.rawQuery("SELECT e.id,e.name,e.category,e.equipment,e.notes,e.tracking_type,e.increment_kg,e.favorite,e.diagram_hint,e.default_sets,te.order_index,te.default_sets FROM template_exercise te JOIN exercise e ON e.id=te.exercise_id WHERE te.template_id=? AND e.archived=0 ORDER BY te.order_index", arrayOf(id.toString())).use { ec ->
-                    while (ec.moveToNext()) items += TemplateExercise(exerciseFromCursor(ec), ec.getInt(10), ec.getInt(11))
+                db.rawQuery("SELECT e.id,e.name,e.category,e.equipment,e.notes,e.tracking_type,e.increment_kg,e.favorite,e.diagram_hint,e.default_sets,e.secondary_muscles,e.aliases,e.image_uri,te.order_index,te.default_sets,te.target_min_reps,te.target_max_reps,te.per_side FROM template_exercise te JOIN exercise e ON e.id=te.exercise_id WHERE te.template_id=? AND e.archived=0 ORDER BY te.order_index", arrayOf(id.toString())).use { ec ->
+                    while (ec.moveToNext()) items += TemplateExercise(exerciseFromCursor(ec), ec.getInt(13), ec.getInt(14), if(ec.isNull(15)) null else ec.getInt(15), if(ec.isNull(16)) null else ec.getInt(16), ec.getInt(17) != 0)
                 }
-                result += WorkoutTemplate(id, name, items)
+                result += WorkoutTemplate(id, name, items, false)
             }
         }
         return result
@@ -164,7 +239,7 @@ class FlipFitDatabase(context: Context) : SQLiteOpenHelper(context, "flipfit.db"
         val values = ContentValues().apply {
             put("name", draft.name); put("category", draft.category); put("equipment", draft.equipment); put("notes", draft.notes)
             put("tracking_type", draft.trackingType); if (draft.incrementKg == null) putNull("increment_kg") else put("increment_kg", draft.incrementKg)
-            put("favorite", if (draft.favorite) 1 else 0); put("diagram_hint", draft.diagramHint); put("default_sets", draft.defaultSets); put("archived", 0)
+            put("favorite", if (draft.favorite) 1 else 0); put("diagram_hint", draft.diagramHint); put("default_sets", draft.defaultSets); put("secondary_muscles", draft.secondaryMuscles); put("aliases", draft.aliases); put("image_uri", draft.imageUri); put("archived", 0)
         }
         return if (draft.id == null) db.insert("exercise", null, values) else {
             db.update("exercise", values, "id=?", arrayOf(draft.id.toString())); draft.id
@@ -175,7 +250,7 @@ class FlipFitDatabase(context: Context) : SQLiteOpenHelper(context, "flipfit.db"
         val ex = getAllExercises().firstOrNull { it.id == exerciseId } ?: return -1L
         return saveExercise(ExerciseDraft(
             name = "${ex.name} Copy", category = ex.category, equipment = ex.equipment, trackingType = ex.trackingType,
-            incrementKg = ex.incrementKg, favorite = false, diagramHint = ex.diagramHint, defaultSets = ex.defaultSets, notes = ex.notes
+            incrementKg = ex.incrementKg, favorite = false, diagramHint = ex.diagramHint, defaultSets = ex.defaultSets, notes = ex.notes, secondaryMuscles = ex.secondaryMuscles, aliases = ex.aliases, imageUri = ex.imageUri
         ))
     }
 
@@ -204,6 +279,10 @@ class FlipFitDatabase(context: Context) : SQLiteOpenHelper(context, "flipfit.db"
 
     fun renameTemplate(templateId: Long, name: String) {
         writableDatabase.update("workout_template", ContentValues().apply { put("name", name) }, "id=?", arrayOf(templateId.toString()))
+    }
+
+    fun archiveTemplate(templateId: Long) {
+        writableDatabase.update("workout_template", ContentValues().apply { put("archived",1) }, "id=?", arrayOf(templateId.toString()))
     }
 
     fun deleteTemplate(templateId: Long) {
@@ -337,6 +416,61 @@ class FlipFitDatabase(context: Context) : SQLiteOpenHelper(context, "flipfit.db"
         } finally { db.endTransaction() }
     }
 
+    fun setTemplateExerciseTarget(templateId: Long, exerciseId: Long, sets: Int, minReps: Int?, maxReps: Int?, perSide: Boolean) {
+        val db = writableDatabase
+        val row = db.rawQuery("SELECT id FROM template_exercise WHERE template_id=? AND exercise_id=? ORDER BY order_index LIMIT 1", arrayOf(templateId.toString(),exerciseId.toString())).use { q -> if(q.moveToFirst()) q.getLong(0) else return }
+        db.update("template_exercise",ContentValues().apply { put("default_sets",sets.coerceAtLeast(1)); if(minReps==null) putNull("target_min_reps") else put("target_min_reps",minReps); if(maxReps==null) putNull("target_max_reps") else put("target_max_reps",maxReps); put("per_side",if(perSide)1 else 0) },"id=?",arrayOf(row.toString()))
+    }
+
+    fun muscleGroups(): List<LibraryAsset> = assets("muscle_group")
+    fun equipment(): List<LibraryAsset> = assets("equipment")
+    private fun assets(table:String): List<LibraryAsset> {
+        val out= mutableListOf<LibraryAsset>(); readableDatabase.rawQuery("SELECT id,name FROM $table ORDER BY name",null).use { q -> while(q.moveToNext()) out += LibraryAsset(q.getLong(0),q.getString(1)) }; return out
+    }
+    fun addMuscleGroup(name:String) { if(name.isNotBlank()) writableDatabase.insertWithOnConflict("muscle_group",null,ContentValues().apply{put("name",name.trim())},SQLiteDatabase.CONFLICT_IGNORE) }
+    fun addEquipment(name:String) { if(name.isNotBlank()) writableDatabase.insertWithOnConflict("equipment",null,ContentValues().apply{put("name",name.trim())},SQLiteDatabase.CONFLICT_IGNORE) }
+    fun deleteMuscleGroup(id:Long) { writableDatabase.delete("muscle_group","id=?",arrayOf(id.toString())) }
+    fun deleteEquipment(id:Long) { writableDatabase.delete("equipment","id=?",arrayOf(id.toString())) }
+
+    fun programs(): List<WorkoutProgram> {
+        val templates = getTemplates().associateBy { it.id }; val out= mutableListOf<WorkoutProgram>()
+        readableDatabase.rawQuery("SELECT id,name,archived FROM program WHERE archived=0 ORDER BY id",null).use { p ->
+            while(p.moveToNext()) { val pid=p.getLong(0); val pts= mutableListOf<ProgramTemplate>()
+                readableDatabase.rawQuery("SELECT template_id,order_index FROM program_template WHERE program_id=? ORDER BY order_index",arrayOf(pid.toString())).use { q -> while(q.moveToNext()) templates[q.getLong(0)]?.let { pts += ProgramTemplate(it,q.getInt(1)) } }
+                out += WorkoutProgram(pid,p.getString(1),pts,p.getInt(2)!=0)
+            }
+        }; return out
+    }
+    fun createProgram(name:String):Long = writableDatabase.insert("program",null,ContentValues().apply{put("name",name.trim())})
+    fun renameProgram(id:Long,name:String){ if(name.isNotBlank()) writableDatabase.update("program",ContentValues().apply{put("name",name.trim())},"id=?",arrayOf(id.toString())) }
+    fun archiveProgram(id:Long){ writableDatabase.update("program",ContentValues().apply{put("archived",1)},"id=?",arrayOf(id.toString())) }
+    fun duplicateProgram(id:Long):Long { val source=programs().firstOrNull{it.id==id}?:return -1; val nid=createProgram(source.name+" Copy"); source.templates.forEach { addTemplateToProgram(nid,it.template.id) }; return nid }
+    fun addTemplateToProgram(programId:Long,templateId:Long){ val order=readableDatabase.rawQuery("SELECT COALESCE(MAX(order_index),-1)+1 FROM program_template WHERE program_id=?",arrayOf(programId.toString())).use{it.moveToFirst();it.getInt(0)}; writableDatabase.insert("program_template",null,ContentValues().apply{put("program_id",programId);put("template_id",templateId);put("order_index",order)}) }
+    fun removeTemplateFromProgram(programId:Long,templateId:Long){ writableDatabase.delete("program_template","program_id=? AND template_id=?",arrayOf(programId.toString(),templateId.toString())) }
+    fun nextTemplateForProgram(program:WorkoutProgram): WorkoutTemplate? {
+        val last = history().firstOrNull { h -> program.templates.any { it.template.id == h.templateId } }
+        if(last==null) return program.templates.minByOrNull{it.orderIndex}?.template
+        val pos=program.templates.indexOfFirst{it.template.id==last.templateId}; val next=if(pos<0||pos>=program.templates.lastIndex)0 else pos+1; return program.templates.getOrNull(next)?.template
+    }
+
+    fun exportBackup(uri: Uri) {
+        writableDatabase.rawQuery("PRAGMA wal_checkpoint(FULL)",null).use { while(it.moveToNext()){} }
+        close()
+        context.contentResolver.openOutputStream(uri,"w")!!.use { out -> File(context.getDatabasePath("flipfit.db").absolutePath).inputStream().use { it.copyTo(out) } }
+    }
+    fun previewBackup(uri: Uri): ImportPreview {
+        val temp=File(context.cacheDir,"flipfit_import_preview.db"); context.contentResolver.openInputStream(uri)!!.use{input->temp.outputStream().use{input.copyTo(it)}}
+        val db=SQLiteDatabase.openDatabase(temp.absolutePath,null,SQLiteDatabase.OPEN_READONLY)
+        fun count(table:String)=try{db.rawQuery("SELECT COUNT(*) FROM $table",null).use{it.moveToFirst();it.getInt(0)}}catch(_:Exception){0}
+        val preview=ImportPreview(count("exercise"),count("workout_template"),count("program"),count("workout_session"),db.version); db.close();temp.delete();return preview
+    }
+    fun importBackup(uri: Uri) {
+        close(); val target=context.getDatabasePath("flipfit.db"); val wal=File(target.absolutePath+"-wal"); val shm=File(target.absolutePath+"-shm"); wal.delete();shm.delete()
+        context.contentResolver.openInputStream(uri)!!.use{input->target.outputStream().use{input.copyTo(it)}}
+        writableDatabase
+    }
+    fun resetStarterContent(){ val db=writableDatabase; db.delete("deleted_starter_template",null,null); ensureCatalog(db) }
+
     fun startSession(template: WorkoutTemplate): Long {
         val db = writableDatabase
         db.beginTransaction()
@@ -362,13 +496,13 @@ class FlipFitDatabase(context: Context) : SQLiteOpenHelper(context, "flipfit.db"
                 val sid = sc.getLong(0); val templateId = if (sc.isNull(1)) null else sc.getLong(1)
                 val name = sc.getString(2); val started = sc.getLong(3); val ended = if (sc.isNull(4)) null else sc.getLong(4); val currentOrder = sc.getInt(5)
                 val exs = mutableListOf<SessionExercise>()
-                db.rawQuery("SELECT we.id,e.id,e.name,e.category,e.equipment,e.notes,e.tracking_type,e.increment_kg,e.favorite,e.diagram_hint,e.default_sets,we.order_index,we.target_sets FROM workout_exercise we JOIN exercise e ON e.id=we.exercise_id WHERE we.session_id=? ORDER BY we.order_index", arrayOf(sid.toString())).use { ec ->
+                db.rawQuery("SELECT we.id,e.id,e.name,e.category,e.equipment,e.notes,e.tracking_type,e.increment_kg,e.favorite,e.diagram_hint,e.default_sets,e.secondary_muscles,e.aliases,e.image_uri,we.order_index,we.target_sets FROM workout_exercise we JOIN exercise e ON e.id=we.exercise_id WHERE we.session_id=? ORDER BY we.order_index", arrayOf(sid.toString())).use { ec ->
                     while (ec.moveToNext()) {
                         val weId = ec.getLong(0); val exercise = exerciseFromCursor(ec, 1); val sets = mutableListOf<LoggedSet>()
                         db.rawQuery("SELECT id,set_number,weight_kg,reps,skipped,is_pr FROM workout_set WHERE workout_exercise_id=? ORDER BY set_number", arrayOf(weId.toString())).use { c ->
                             while (c.moveToNext()) sets += LoggedSet(c.getLong(0), exercise.id, c.getInt(1), c.getDouble(2), c.getInt(3), c.getInt(4) != 0, c.getInt(5) != 0)
                         }
-                        exs += SessionExercise(weId, exercise, ec.getInt(11), ec.getInt(12), sets)
+                        exs += SessionExercise(weId, exercise, ec.getInt(14), ec.getInt(15), sets)
                     }
                 }
                 out += WorkoutSession(sid, templateId, name, started, ended, currentOrder, exs)
