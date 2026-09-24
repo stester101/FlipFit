@@ -6,6 +6,7 @@ import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -380,7 +381,13 @@ private fun ExerciseEditorDialog(exercise: Exercise?, muscleGroups: List<Library
     var muscleOpen by remember{mutableStateOf(false)}; var equipmentOpen by remember{mutableStateOf(false)}
     var addMuscle by remember{mutableStateOf(false)}; var addEquip by remember{mutableStateOf(false)}; var confirmDelete by remember{mutableStateOf(false)}
     val context=LocalContext.current
-    val imagePicker=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()){uri->uri?.let{ runCatching{context.contentResolver.takePersistableUriPermission(it,Intent.FLAG_GRANT_READ_URI_PERMISSION)}; imageUri=it.toString() }}
+    val imagePicker=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()){uri->uri?.let{
+        runCatching {
+            val mime=context.contentResolver.getType(it)?:"image/jpeg"
+            val bytes=context.contentResolver.openInputStream(it)!!.use { input -> input.readBytes() }
+            imageUri="data:$mime;base64,"+Base64.encodeToString(bytes,Base64.NO_WRAP)
+        }
+    }}
     Dialog(onDismissRequest = onDismiss) { Surface(color = GlassDeep, shape = RoundedCornerShape(28.dp), border = BorderStroke(1.dp, GlassEdge), modifier = Modifier.fillMaxWidth().heightIn(max = 680.dp)) { Column(Modifier.verticalScroll(rememberScrollState()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(if (exercise == null) "NEW EXERCISE" else "EDIT EXERCISE", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Black)
         if(imageUri.isNotBlank()) AsyncImage(model=imageUri,contentDescription="Exercise diagram",modifier=Modifier.fillMaxWidth().height(150.dp).clip(RoundedCornerShape(18.dp)))
