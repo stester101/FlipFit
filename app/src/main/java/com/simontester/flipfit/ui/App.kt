@@ -195,17 +195,36 @@ private fun SettingsDialog(vm: MainViewModel, onDismiss: () -> Unit) {
     var keepAwake by remember { mutableStateOf(vm.settings.keepAwake) }
     var haptics by remember { mutableStateOf(vm.settings.haptics) }
     var increment by remember { mutableFloatStateOf(vm.settings.incrementKg) }
+    var preview by remember { mutableStateOf<Pair<android.net.Uri, ImportPreview>?>(null) }
+    var message by remember { mutableStateOf<String?>(null) }
+    val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+        uri?.let { runCatching { vm.exportBackup(it); message = "Backup exported" }.onFailure { message = "Export failed: ${it.message}" } }
+    }
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let { runCatching { preview = it to vm.previewBackup(it) }.onFailure { message = "That file is not a valid FlipFit backup" } }
+    }
     Dialog(onDismissRequest = onDismiss) {
-        Surface(color = SurfaceHigh, shape = RoundedCornerShape(24.dp), border = BorderStroke(1.dp, OutlineSoft), modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Surface(color = GlassDeep, shape = RoundedCornerShape(28.dp), border = BorderStroke(1.dp, GlassEdge), modifier = Modifier.fillMaxWidth().heightIn(max=680.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text("SETTINGS", color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Black)
                 SettingSwitch("Keep screen awake", keepAwake) { keepAwake = it; vm.settings.keepAwake = it }
                 SettingSwitch("Haptics", haptics) { haptics = it; vm.settings.haptics = it }
                 SectionLabel("GLOBAL WEIGHT INCREMENT")
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) { listOf(0.5f, 1f, 2f, 2.5f, 5f).forEach { v -> FilterChip(selected = increment == v, onClick = { increment = v; vm.settings.incrementKg = v }, label = { Text("${fmt(v.toDouble())}kg") }) } }
+                SectionLabel("BACKUP & RESTORE")
+                Text("A FlipFit backup contains exercises, programs, templates and complete workout history.", color=Muted, fontSize=12.sp)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick={exportLauncher.launch("FlipFit-backup-v${BuildConfig.VERSION_NAME}.flipfit")},modifier=Modifier.weight(1f)){Text("EXPORT",color=Accent)}
+                    OutlinedButton(onClick={importLauncher.launch(arrayOf("*/*"))},modifier=Modifier.weight(1f)){Text("IMPORT",color=Accent)}
+                }
+                OutlinedButton(onClick={vm.resetStarterContent();message="Starter content restored"},modifier=Modifier.fillMaxWidth()){Text("RESTORE STARTER CONTENT",color=Muted)}
+                message?.let { Text(it,color=Accent,fontSize=11.sp) }
                 Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("DONE", color = Color.Black, fontWeight = FontWeight.Black) }
             }
         }
+    }
+    preview?.let { (uri,p) ->
+        AlertDialog(onDismissRequest={preview=null},containerColor=GlassDeep,title={Text("Import FlipFit backup?")},text={Text("${p.exercises} exercises • ${p.templates} templates • ${p.programs} programs • ${p.workouts} workouts\n\nThis will replace the current FlipFit database. Export first if you want to keep it.")},confirmButton={TextButton(onClick={runCatching{vm.importBackup(uri);message="Backup restored";preview=null}.onFailure{message="Import failed: ${it.message}";preview=null}}){Text("REPLACE & IMPORT",color=Danger)}},dismissButton={TextButton(onClick={preview=null}){Text("CANCEL")}})
     }
 }
 
