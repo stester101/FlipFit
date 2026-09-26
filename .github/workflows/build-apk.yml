@@ -1,8 +1,8 @@
-name: Build FlipFit APK
+name: Build TPT Poker Timer APK
 on:
   workflow_dispatch:
   push:
-    branches: [ main, v0.7.0-programs-backup-assets ]
+    branches: [ tpt-poker-timer-build ]
 permissions:
   contents: read
 jobs:
@@ -30,13 +30,11 @@ jobs:
       - name: Build debug APK
         run: ./gradlew :app:assembleDebug --stacktrace
       - name: Rename APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk FlipFit-v0.7.0-debug.apk
+        run: cp app/build/outputs/apk/debug/app-debug.apk TPT-Poker-Timer-v1.0.0-debug.apk
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: FlipFit-v0.7.0-APK
-          path: FlipFit-v0.7.0-debug.apk
+          name: TPT-Poker-Timer-v1.0.0-APK
+          path: TPT-Poker-Timer-v1.0.0-debug.apk
           if-no-files-found: error
           retention-days: 30
-
-# v0.7.0 final verification
