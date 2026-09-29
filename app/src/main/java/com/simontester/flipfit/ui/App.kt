@@ -7,6 +7,9 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.util.Base64
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import java.io.ByteArrayOutputStream
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -28,6 +31,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
@@ -343,7 +347,7 @@ private fun ExercisePickerDialog(exercises: List<Exercise>, title: String, onDis
 }
 
 @Composable
-private fun ExerciseHelpDialog(exercise: Exercise, onDismiss: () -> Unit) { Dialog(onDismissRequest = onDismiss) { Surface(color = SurfaceHigh, shape = RoundedCornerShape(24.dp), border = BorderStroke(1.dp, OutlineSoft), modifier = Modifier.fillMaxWidth()) { Column(Modifier.padding(18.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) { Text(exercise.name.uppercase(), color = Color.White, fontWeight = FontWeight.Black, textAlign = TextAlign.Center); if(exercise.imageUri.isNotBlank()){ AsyncImage(model=exercise.imageUri,contentDescription=exercise.name,modifier=Modifier.fillMaxWidth().height(190.dp).clip(RoundedCornerShape(20.dp))); Text("EXERCISE DIAGRAM",color=Accent,fontSize=10.sp,fontWeight=FontWeight.Bold) } else { Text("MOVEMENT DIAGRAM • PLACEHOLDER", color = Accent, fontSize = 10.sp, fontWeight = FontWeight.Bold); Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) { DiagramFrame("START"); Text("→", color = Accent, fontSize = 30.sp, fontWeight = FontWeight.Black); DiagramFrame("FINISH") } }; Text(exercise.diagramHint.ifBlank { "Use controlled form through a comfortable range of motion." }, color = Muted, fontSize = 13.sp, textAlign = TextAlign.Center); Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("BACK TO SET", color = Color.Black, fontWeight = FontWeight.Black) } } } } }
+private fun ExerciseHelpDialog(exercise: Exercise, onDismiss: () -> Unit) { Dialog(onDismissRequest = onDismiss) { Surface(color = SurfaceHigh, shape = RoundedCornerShape(24.dp), border = BorderStroke(1.dp, OutlineSoft), modifier = Modifier.fillMaxWidth()) { Column(Modifier.padding(18.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) { Text(exercise.name.uppercase(), color = Color.White, fontWeight = FontWeight.Black, textAlign = TextAlign.Center); if(exercise.imageUri.isNotBlank()){ AsyncImage(model=exerciseImageModel(exercise.imageUri),contentDescription=exercise.name,modifier=Modifier.fillMaxWidth().height(190.dp).clip(RoundedCornerShape(20.dp)),contentScale=ContentScale.Fit); Text("EXERCISE DIAGRAM",color=Accent,fontSize=10.sp,fontWeight=FontWeight.Bold) } else { Text("MOVEMENT DIAGRAM • PLACEHOLDER", color = Accent, fontSize = 10.sp, fontWeight = FontWeight.Bold); Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) { DiagramFrame("START"); Text("→", color = Accent, fontSize = 30.sp, fontWeight = FontWeight.Black); DiagramFrame("FINISH") } }; Text(exercise.diagramHint.ifBlank { "Use controlled form through a comfortable range of motion." }, color = Muted, fontSize = 13.sp, textAlign = TextAlign.Center); Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("BACK TO SET", color = Color.Black, fontWeight = FontWeight.Black) } } } } }
 
 @Composable
 private fun DiagramFrame(label: String) { Box(Modifier.size(width = 112.dp, height = 105.dp).clip(RoundedCornerShape(17.dp)).background(Bg), contentAlignment = Alignment.Center) { Column(horizontalAlignment = Alignment.CenterHorizontally) { Text("●", color = Accent, fontSize = 24.sp); Text("╱│╲", color = Color.White, fontSize = 19.sp); Text("╱ ╲", color = Color.White, fontSize = 19.sp); Text(label, color = Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold) } } }
@@ -383,14 +387,21 @@ private fun ExerciseEditorDialog(exercise: Exercise?, muscleGroups: List<Library
     val context=LocalContext.current
     val imagePicker=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()){uri->uri?.let{
         runCatching {
-            val mime=context.contentResolver.getType(it)?:"image/jpeg"
-            val bytes=context.contentResolver.openInputStream(it)!!.use { input -> input.readBytes() }
-            imageUri="data:$mime;base64,"+Base64.encodeToString(bytes,Base64.NO_WRAP)
-        }
+            val raw=context.contentResolver.openInputStream(it)!!.use { input -> input.readBytes() }
+            val bounds=BitmapFactory.Options().apply{inJustDecodeBounds=true}
+            BitmapFactory.decodeByteArray(raw,0,raw.size,bounds)
+            var sample=1
+            while(bounds.outWidth/sample>1200 || bounds.outHeight/sample>1200) sample*=2
+            val bitmap=BitmapFactory.decodeByteArray(raw,0,raw.size,BitmapFactory.Options().apply{inSampleSize=sample})
+                ?: error("Unsupported image")
+            val out=ByteArrayOutputStream()
+            bitmap.compress(Bitmap.CompressFormat.JPEG,88,out)
+            imageUri="data:image/jpeg;base64,"+Base64.encodeToString(out.toByteArray(),Base64.NO_WRAP)
+        }.onFailure { imageUri="" }
     }}
     Dialog(onDismissRequest = onDismiss) { Surface(color = GlassDeep, shape = RoundedCornerShape(28.dp), border = BorderStroke(1.dp, GlassEdge), modifier = Modifier.fillMaxWidth().heightIn(max = 680.dp)) { Column(Modifier.verticalScroll(rememberScrollState()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(if (exercise == null) "NEW EXERCISE" else "EDIT EXERCISE", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Black)
-        if(imageUri.isNotBlank()) AsyncImage(model=imageUri,contentDescription="Exercise diagram",modifier=Modifier.fillMaxWidth().height(150.dp).clip(RoundedCornerShape(18.dp)))
+        if(imageUri.isNotBlank()) AsyncImage(model=exerciseImageModel(imageUri),contentDescription="Exercise diagram",modifier=Modifier.fillMaxWidth().height(150.dp).clip(RoundedCornerShape(18.dp)),contentScale=ContentScale.Crop)
         OutlinedButton(onClick={imagePicker.launch(arrayOf("image/*"))},modifier=Modifier.fillMaxWidth()){Text(if(imageUri.isBlank())"ATTACH IMAGE / DIAGRAM" else "CHANGE IMAGE",color=Accent)}
         OutlinedTextField(name, { name = it }, label = { Text("Name") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
         ExposedDropdownMenuBox(expanded=muscleOpen,onExpandedChange={muscleOpen=!muscleOpen}) {
@@ -618,3 +629,13 @@ private fun HistoryCard(session: WorkoutSession, onClick: (() -> Unit)?) {
 private fun previousLine(previous: List<PreviousSet>, trackingType: String): String { if (previous.isEmpty()) return "FIRST TIME"; return "LAST " + previous.joinToString(" · ") { p -> if (trackingType == "reps_only") "${p.reps}" else "${fmt(p.weightKg)}×${p.reps}" } }
 private fun fmt(value: Double): String = if (value == value.roundToInt().toDouble()) value.roundToInt().toString() else String.format(Locale.UK, "%.1f", value)
 private fun haptic(context: Context, strong: Boolean) { val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) context.getSystemService(VibratorManager::class.java)?.defaultVibrator else { @Suppress("DEPRECATION") context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator } ?: return; if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) vibrator.vibrate(VibrationEffect.createOneShot(if (strong) 45L else 18L, if (strong) 150 else 70)) else { @Suppress("DEPRECATION") vibrator.vibrate(if (strong) 45L else 18L) } }
+private fun exerciseImageModel(value:String): Any? {
+    if(value.isBlank()) return null
+    if(!value.startsWith("data:")) return value
+    return runCatching {
+        val payload=value.substringAfter("base64,", "")
+        if(payload.isBlank()) null else Base64.decode(payload,Base64.DEFAULT)
+    }.getOrNull()
+}
+
+
